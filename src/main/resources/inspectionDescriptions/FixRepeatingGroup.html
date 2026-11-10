@@ -1,0 +1,13 @@
+<html>
+<body>
+Reports FIX messages whose repeating groups are broken:
+<ul>
+  <li>the NumInGroup count does not match the number of instances found</li>
+  <li>an instance does not start with the group's first field (its delimiter)</li>
+  <li>a field is out of order, or appears twice, inside an instance</li>
+  <li>an unknown tag ends a group early (add it to a custom dictionary if it belongs to the group)</li>
+</ul>
+<p>The quick fix sets the count to the number of instances present.</p>
+<p>Can be switched off in <b>Settings | Tools | FIX Decoder</b>.</p>
+</body>
+</html>

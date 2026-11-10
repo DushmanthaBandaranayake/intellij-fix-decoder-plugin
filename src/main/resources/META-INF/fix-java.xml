@@ -1,0 +1,10 @@
+<!-- Loaded only when the Java plugin is present: everything that reads Java PSI. -->
+<idea-plugin>
+    <extensions defaultExtensionNs="com.dush.fixdecoder">
+        <messageFinder implementation="com.dush.intellij.fixdecoder.java.JavaMessageFinder"/>
+    </extensions>
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Pasting a FIX message into Java asks whether to paste it as a Java string -->
+        <editorActionHandler action="EditorPaste" implementationClass="com.dush.intellij.fixdecoder.java.FixPasteHandler" order="first"/>
+    </extensions>
+</idea-plugin>

@@ -1,0 +1,103 @@
+<!-- require-restart: unloading live can leave the plugin referenced in memory, which delays or hangs uninstalling -->
+<idea-plugin require-restart="true">
+    <id>com.dush.fixdecoder</id>
+    <name>FIX Decoder</name>
+    <vendor email="dushmanthab99@gmail.com">Dushmantha Bandaranayake</vendor>
+    <description><![CDATA[
+        <p>Reads FIX protocol messages where they are written: in Java string literals, text blocks and
+        concatenations, and in plain text files.</p>
+        <ul>
+            <li><b>Hover</b> over a field to see the tag name, type, what the value means (<code>54=1</code> is Buy),
+                the other allowed values, and whether the message type requires it</li>
+            <li><b>Decode</b> a message into a table in the FIX Decoder tool window, with repeating groups as
+                numbered instances. Click a value to select it in the editor, even inside a concatenation</li>
+            <li><b>Repeating groups are checked</b>: counts against the instances found, the first field of each
+                instance, field order, and unknown tags that end a group early</li>
+            <li>Wrong <b>BodyLength (9)</b> and <b>CheckSum (10)</b> are reported, and a quick fix recomputes them,
+                keeping the string's escapes (<code>\u0001</code> or <code>\001</code>)</li>
+            <li><b>Inline hints</b> show value meanings next to the values</li>
+            <li>Convert delimiters between SOH and <code>|</code>, copy a message as readable text, and choose how to
+                paste a message from a log into Java code</li>
+            <li><b>Custom dictionaries</b> (QuickFIX/J XML) for venue-specific tags and values</li>
+        </ul>
+        <p>Bundles the FIX 4.2, FIX 4.4, FIX 5.0 SP2 and FIXT 1.1 dictionaries. Settings are in
+        <b>Settings | Tools | FIX Decoder</b>.</p>
+        <p>This product includes software developed by quickfixengine.org (http://www.quickfixengine.org/):
+        the bundled data dictionaries come from QuickFIX/J and are used under the QuickFIX Software License.</p>
+        <p>Free to use under the MIT License. Copyright (c) 2026 Dushmantha Bandaranayake.</p>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <p>1.0.0: first release.</p>
+    ]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends optional="true" config-file="fix-java.xml">com.intellij.java</depends>
+
+    <extensionPoints>
+        <!-- Finds messages in one kind of file; files no finder handles are scanned as plain text. -->
+        <extensionPoint name="messageFinder" interface="com.dush.intellij.fixdecoder.extract.FixMessageFinder" dynamic="false"/>
+    </extensionPoints>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <projectService serviceImplementation="com.dush.intellij.fixdecoder.settings.FixDecoderSettings"/>
+        <projectService serviceImplementation="com.dush.intellij.fixdecoder.settings.FixDictionaries"/>
+        <notificationGroup id="FIX Decoder" displayType="BALLOON"/>
+        <projectConfigurable parentId="tools" id="com.dush.fixdecoder.settings" displayName="FIX Decoder"
+                             instance="com.dush.intellij.fixdecoder.settings.FixDecoderConfigurable"/>
+
+        <!-- Hover: details of the field under the mouse, in any editor -->
+        <editorFactoryMouseMotionListener implementation="com.dush.intellij.fixdecoder.hover.FixHoverListener"/>
+        <editorFactoryMouseListener implementation="com.dush.intellij.fixdecoder.hover.FixHoverListener"/>
+
+        <!-- No language: they run on Java, plain text and every other file -->
+        <localInspection shortName="FixRepeatingGroup" displayName="Repeating group is broken" groupName="FIX Decoder"
+                         enabledByDefault="true" level="ERROR"
+                         implementationClass="com.dush.intellij.fixdecoder.inspection.FixRepeatingGroupInspection"/>
+        <localInspection shortName="FixLengthChecksum" displayName="BodyLength or CheckSum is wrong" groupName="FIX Decoder"
+                         enabledByDefault="true" level="ERROR"
+                         implementationClass="com.dush.intellij.fixdecoder.inspection.FixLengthChecksumInspection"/>
+        <localInspection shortName="FixEnumValue" displayName="Value is not defined for the field" groupName="FIX Decoder"
+                         enabledByDefault="true" level="ERROR"
+                         implementationClass="com.dush.intellij.fixdecoder.inspection.FixEnumValueInspection"/>
+
+        <!-- A file with FIX problems gets a red underline in the Project view and on its tab, like a compile error -->
+        <highlightingPassFactory implementation="com.dush.intellij.fixdecoder.inspection.FixProblemFiles"/>
+        <problemFileHighlightFilter implementation="com.dush.intellij.fixdecoder.inspection.FixProblemFiles$Filter"/>
+
+        <intentionAction>
+            <className>com.dush.intellij.fixdecoder.intention.DecodeMessageIntention</className>
+            <category>FIX Decoder</category>
+        </intentionAction>
+        <intentionAction>
+            <className>com.dush.intellij.fixdecoder.intention.RecomputeLengthChecksumIntention</className>
+            <category>FIX Decoder</category>
+        </intentionAction>
+        <intentionAction>
+            <className>com.dush.intellij.fixdecoder.intention.ConvertToPipeIntention</className>
+            <category>FIX Decoder</category>
+        </intentionAction>
+        <intentionAction>
+            <className>com.dush.intellij.fixdecoder.intention.ConvertToSohIntention</className>
+            <category>FIX Decoder</category>
+        </intentionAction>
+
+        <!-- Inline hints after values with a meaning -->
+        <highlightingPassFactory implementation="com.dush.intellij.fixdecoder.hints.FixHintsPassFactory"/>
+
+        <toolWindow id="FIX Decoder" anchor="bottom" icon="/icons/toolWindow.svg" canCloseContents="false"
+                    factoryClass="com.dush.intellij.fixdecoder.toolwindow.FixDecoderToolWindow"/>
+    </extensions>
+
+    <actions>
+        <group id="FixDecoder.EditorPopup" text="FIX Decoder" popup="true" icon="/icons/fixDecoder.svg">
+            <action id="FixDecoder.Decode" class="com.dush.intellij.fixdecoder.actions.DecodeFixMessageAction" icon="/icons/fixDecoder.svg"
+                    text="Decode FIX Message" description="Show the FIX message at the caret in the FIX Decoder tool window">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift F"/>
+            </action>
+            <action id="FixDecoder.CopyReadable" class="com.dush.intellij.fixdecoder.actions.CopyReadableAction" icon="AllIcons.Actions.Copy"
+                    text="Copy FIX Message as Readable" description="Copy the FIX message at the caret with | as delimiter"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </group>
+    </actions>
+</idea-plugin>

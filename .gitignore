@@ -1,0 +1,10 @@
+# Gradle and build output
+.gradle/
+build/
+
+# Test IDE downloaded and run by the IntelliJ Platform Gradle plugin
+.intellijPlatform/
+
+# IDE settings
+.idea/
+*.iml
