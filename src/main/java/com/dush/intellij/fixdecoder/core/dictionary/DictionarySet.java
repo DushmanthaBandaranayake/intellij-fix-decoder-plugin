@@ -1,6 +1,5 @@
 package com.dush.intellij.fixdecoder.core.dictionary;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -25,10 +24,43 @@ public final class DictionarySet {
 
     private static volatile DictionarySet bundled;
 
+    /** How one version is built: its XML files (standard first, then custom), with the FIXT session layer apart. */
+    private static final class Recipe {
+        final List<DictionaryParser.Source> app;
+        final String appLabel;
+        final List<DictionaryParser.Source> transport;   // null unless FIXT
+        final String transportLabel;
+
+        Recipe(List<DictionaryParser.Source> app, String appLabel, List<DictionaryParser.Source> transport, String transportLabel) {
+            this.app = app;
+            this.appLabel = appLabel;
+            this.transport = transport;
+            this.transportLabel = transportLabel;
+        }
+
+        Recipe with(DictionaryParser.Source custom) {
+            List<DictionaryParser.Source> a = new ArrayList<>(app);
+            a.add(custom);
+            List<DictionaryParser.Source> t = null;
+            if (transport != null) {
+                t = new ArrayList<>(transport);
+                t.add(custom);   // a custom header or trailer belongs to the session layer
+            }
+            return new Recipe(a, appLabel + " + " + custom.name, t, transportLabel);
+        }
+
+        Dictionary build() throws DictionaryParser.DictionaryException {
+            Dictionary appDict = DictionaryParser.parse(app, appLabel);
+            return transport == null ? appDict : Dictionary.combine(DictionaryParser.parse(transport, transportLabel), appDict);
+        }
+    }
+
+    private final Map<String, Recipe> recipes;
     private final Map<String, Dictionary> byVersion;
     private final Set<Integer> knownTags = new HashSet<>();
 
-    private DictionarySet(Map<String, Dictionary> byVersion) {
+    private DictionarySet(Map<String, Recipe> recipes, Map<String, Dictionary> byVersion) {
+        this.recipes = recipes;
         this.byVersion = byVersion;
         for (Dictionary d : byVersion.values()) {
             for (FieldDef f : d.fields()) knownTags.add(f.number());
@@ -48,35 +80,46 @@ public final class DictionarySet {
     }
 
     private static DictionarySet loadBundled() {
+        Map<String, Recipe> recipes = new LinkedHashMap<>();
+        recipes.put(FIX42, new Recipe(List.of(resource("FIX42.xml")), "FIX 4.2", null, null));
+        recipes.put(FIX44, new Recipe(List.of(resource("FIX44.xml")), "FIX 4.4", null, null));
+        recipes.put(FIX50SP2, new Recipe(List.of(resource("FIX50SP2.xml")), "FIX 5.0 SP2", List.of(resource("FIXT11.xml")), "FIXT 1.1"));
         Map<String, Dictionary> map = new LinkedHashMap<>();
-        map.put(FIX42, load("FIX42.xml", "FIX 4.2"));
-        map.put(FIX44, load("FIX44.xml", "FIX 4.4"));
-        map.put(FIX50SP2, Dictionary.combine(load("FIXT11.xml", "FIXT 1.1"), load("FIX50SP2.xml", "FIX 5.0 SP2")));
-        return new DictionarySet(map);
+        try {
+            for (Map.Entry<String, Recipe> e : recipes.entrySet()) map.put(e.getKey(), e.getValue().build());
+        } catch (DictionaryParser.DictionaryException e) {
+            throw new IllegalStateException("Bundled dictionaries could not be read", e);
+        }
+        return new DictionarySet(recipes, map);
     }
 
-    private static Dictionary load(String file, String label) {
+    private static DictionaryParser.Source resource(String file) {
         try (InputStream in = DictionarySet.class.getResourceAsStream("/dictionaries/" + file)) {
             if (in == null) throw new IllegalStateException("Bundled dictionary missing: " + file);
-            return DictionaryParser.parse(in, label);
-        } catch (IOException | DictionaryParser.DictionaryException e) {
+            return new DictionaryParser.Source(file, in.readAllBytes());
+        } catch (IOException e) {
             throw new IllegalStateException("Bundled dictionary " + file + " could not be read", e);
         }
     }
 
     /**
-     * Returns a copy with one custom dictionary laid over the versions it is for: the version in its root element
-     * ({@code <fix major="4" minor="4">}), or every version when the root gives none.
+     * Returns a copy with one custom dictionary merged into the versions it is for: the version in its root element
+     * ({@code <fix major="4" minor="4">}), or every version when the root gives none. The version is built again from
+     * the standard XML and all custom files, so a redefined component reaches every message that uses it.
      */
     public DictionarySet withCustom(String name, byte[] xml) throws DictionaryParser.DictionaryException {
+        DictionaryParser.check(xml, name);
         String target = targetVersion(xml);
+        DictionaryParser.Source custom = new DictionaryParser.Source(name, xml);
+        Map<String, Recipe> r = new LinkedHashMap<>(recipes);
         Map<String, Dictionary> map = new LinkedHashMap<>(byVersion);
-        for (Map.Entry<String, Dictionary> e : byVersion.entrySet()) {
+        for (Map.Entry<String, Recipe> e : recipes.entrySet()) {
             if (target != null && !target.equals(e.getKey())) continue;
-            Dictionary custom = DictionaryParser.parse(new ByteArrayInputStream(xml), name, e.getValue());
-            map.put(e.getKey(), e.getValue().overlay(custom, name));
+            Recipe next = e.getValue().with(custom);
+            r.put(e.getKey(), next);
+            map.put(e.getKey(), next.build());
         }
-        return new DictionarySet(map);
+        return new DictionarySet(r, map);
     }
 
     /** The version a custom file is for, or null for all. */

@@ -39,9 +39,81 @@ public class DecoderPanelTest extends FixTestCase {
         panel.show(myFixture.getEditor().getDocument(), only());
         String tags = panel.rows().stream().map(r -> r.tag).collect(Collectors.joining(","));
         assertEquals("8,35,11,453,[1],448,452,[2],448,452,55,54", tags);
+        assertFalse("the holder row must stay hidden", panel.isRootVisible());
         assertEquals("Buy", panel.rows().get(11).meaning);
         assertEquals("2 instances", panel.rows().get(3).meaning);
         assertTrue(panel.headerText(), panel.headerText().startsWith("NewOrderSingle (35=D) · FIX 4.4 · Orders.java:2"));
+    }
+
+    public void testSearch() {
+        java(ORDER);
+        FixDecoderPanel panel = panel();
+        panel.show(myFixture.getEditor().getDocument(), only());
+        try {
+            // nothing is hidden: the match is highlighted and selected
+            panel.setSearchText("desk");
+            assertEquals(12, panel.shownTags().size());
+            assertEquals("[448]", panel.matchedTags().toString());
+            assertEquals("DESK7", panel.selectedRow().value);
+            assertTrue(panel.headerText(), panel.headerText().contains("· match 1 of 1"));
+
+            // Enter moves to the next match and wraps; Shift+Enter goes back
+            panel.setSearchText("452");
+            assertEquals("[452, 452]", panel.matchedTags().toString());
+            assertEquals("11", panel.selectedRow().value);
+            panel.nextMatch(1);
+            assertEquals("24", panel.selectedRow().value);
+            assertTrue(panel.headerText(), panel.headerText().contains("· match 2 of 2"));
+            panel.nextMatch(1);
+            assertEquals("11", panel.selectedRow().value);
+            panel.nextMatch(-1);
+            assertEquals("24", panel.selectedRow().value);
+
+            // names and meanings count too; instance rows don't
+            panel.setSearchText("NoPartyIDs");
+            assertEquals("[453]", panel.matchedTags().toString());
+            panel.setSearchText("BUY");
+            assertEquals("[54]", panel.matchedTags().toString());
+
+            panel.setSearchText("nothing like this");
+            assertTrue(panel.matchedTags().isEmpty());
+            assertEquals(12, panel.shownTags().size());
+            assertTrue(panel.headerText(), panel.headerText().contains("· no matches"));
+
+            // rebuilding (flat view) keeps the search
+            panel.setSearchText("452");
+            panel.setFlat(true);
+            assertEquals(10, panel.shownTags().size());
+            assertEquals("[452, 452]", panel.matchedTags().toString());
+
+            panel.setSearchText("");
+            assertTrue(panel.matchedTags().isEmpty());
+            assertFalse(panel.headerText().contains("match"));
+        } finally {
+            panel.setFlat(false);
+            panel.setSearchText("");
+        }
+    }
+
+    public void testFlatList() {
+        java(ORDER);
+        FixDecoderPanel panel = panel();
+        panel.show(myFixture.getEditor().getDocument(), only());
+        try {
+            panel.setFlat(true);
+            String tags = panel.rows().stream().map(r -> r.tag).collect(Collectors.joining(","));
+            assertEquals("8,35,11,453,448,452,448,452,55,54", tags);
+            assertEquals("2 instances", panel.rows().get(3).meaning);
+            // still linked to the editor
+            panel.click(panel.rows().get(6), FixDecoderPanel.COL_VALUE, false);
+            assertEquals("DESK7", myFixture.getEditor().getSelectionModel().getSelectedText());
+
+            panel.setFlat(false);
+            assertEquals("8,35,11,453,[1],448,452,[2],448,452,55,54",
+                    panel.rows().stream().map(r -> r.tag).collect(Collectors.joining(",")));
+        } finally {
+            panel.setFlat(false);
+        }
     }
 
     public void testClickSelectsValueInConcatenation() {

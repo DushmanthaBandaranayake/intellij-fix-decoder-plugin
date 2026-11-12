@@ -8,8 +8,10 @@ import org.w3c.dom.NodeList;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -18,10 +20,17 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Reads a data dictionary in the QuickFIX/J XML format. Components are flattened into the lists that use them.
+ * Reads data dictionaries in the QuickFIX/J XML format. Components are flattened into the lists that use them.
  * <p>
- * A custom dictionary may contain only some sections and may refer to fields and components of a {@code base}
- * dictionary, which is how venue extensions are usually written.
+ * Several files can be read as one: a standard dictionary followed by custom ones. They are merged before anything is
+ * flattened, so that a custom file that redefines a component (say, Parties with a venue tag) changes every message
+ * that uses it, not only the messages the custom file lists. Merge rules, later files winning:
+ * <ul>
+ *   <li>fields by number; enum values are added to the earlier ones</li>
+ *   <li>components by name, messages by MsgType: replaced as a whole</li>
+ *   <li>header and trailer entries by name: replaced in place, or added (trailer entries go before CheckSum)</li>
+ * </ul>
+ * A custom file may contain only some sections and may refer to fields and components of the files before it.
  */
 public final class DictionaryParser {
 
@@ -32,25 +41,61 @@ public final class DictionaryParser {
         }
     }
 
-    private final Map<Integer, FieldDef> fields = new LinkedHashMap<>();
-    private final Map<String, FieldDef> fieldsByName = new HashMap<>();
+    /** One XML file to read. */
+    public static final class Source {
+        final String name;
+        final byte[] xml;
+
+        public Source(String name, byte[] xml) {
+            this.name = name;
+            this.xml = xml;
+        }
+    }
+
+    // merged elements
+    private final Map<Integer, Element> fieldElements = new LinkedHashMap<>();
+    private final Map<Integer, Map<String, String>> fieldValues = new HashMap<>();
+    private final Map<String, Integer> numberByName = new HashMap<>();
     private final Map<String, Element> componentElements = new HashMap<>();
+    private final Map<String, Element> messageElements = new LinkedHashMap<>();
+    private final List<Element> headerEntries = new ArrayList<>();
+    private final List<Element> trailerEntries = new ArrayList<>();
+    private String beginString = "";
+
+    // built
+    private final Map<Integer, FieldDef> fields = new LinkedHashMap<>();
     private final Map<String, List<MemberDef>> components = new LinkedHashMap<>();
     private final Set<String> resolving = new HashSet<>();
-    private final Dictionary base;
 
-    private DictionaryParser(Dictionary base) {
-        this.base = base;
+    private DictionaryParser() {
     }
 
     public static Dictionary parse(InputStream in, String label) throws DictionaryException {
-        return parse(in, label, null);
+        byte[] bytes;
+        try {
+            bytes = in.readAllBytes();
+        } catch (java.io.IOException e) {
+            throw new DictionaryException("Not a readable file: " + e.getMessage(), e);
+        }
+        return parse(Collections.singletonList(new Source(label, bytes)), label);
     }
 
-    public static Dictionary parse(InputStream in, String label, Dictionary base) throws DictionaryException {
+    /** Reads the files as one dictionary, later files laid over earlier ones. */
+    public static Dictionary parse(List<Source> sources, String label) throws DictionaryException {
+        DictionaryParser p = new DictionaryParser();
+        for (Source s : sources) p.merge(root(s));
+        return p.build(label);
+    }
+
+    /** Checks that a file is a dictionary, without building anything. */
+    public static void check(byte[] xml, String name) throws DictionaryException {
+        root(new Source(name, xml));
+    }
+
+    private static Element root(Source s) throws DictionaryException {
         Document doc;
         try {
-            doc = newBuilder().parse(in);
+            doc = newBuilder().parse(new ByteArrayInputStream(s.xml));
         } catch (Exception e) {
             throw new DictionaryException("Not a readable XML file: " + e.getMessage(), e);
         }
@@ -58,7 +103,7 @@ public final class DictionaryParser {
         if (root == null || !"fix".equals(root.getTagName())) {
             throw new DictionaryException("Not a QuickFIX/J dictionary: the root element must be <fix>", null);
         }
-        return new DictionaryParser(base).read(root, label);
+        return root;
     }
 
     private static DocumentBuilder newBuilder() throws Exception {
@@ -81,7 +126,10 @@ public final class DictionaryParser {
         return (type.isEmpty() ? "FIX" : type) + "." + major + "." + minor;
     }
 
-    private Dictionary read(Element root, String label) throws DictionaryException {
+    // --- merging ---
+
+    private void merge(Element root) throws DictionaryException {
+        if (beginString.isEmpty()) beginString = beginString(root);
         Element fieldsEl = child(root, "fields");
         if (fieldsEl != null) {
             for (Element f : children(fieldsEl, "field")) {
@@ -93,65 +141,94 @@ public final class DictionaryParser {
                 } catch (NumberFormatException e) {
                     throw new DictionaryException("Field '" + name + "' has an invalid number '" + number + "'", e);
                 }
-                Map<String, String> values = new LinkedHashMap<>();
-                for (Element v : children(f, "value")) {
-                    values.put(v.getAttribute("enum"), v.getAttribute("description"));
-                }
-                FieldDef def = new FieldDef(n, name, f.getAttribute("type"), values);
-                fields.put(n, def);
-                fieldsByName.put(name, def);
+                fieldElements.put(n, f);
+                numberByName.put(name, n);
+                Map<String, String> values = fieldValues.computeIfAbsent(n, k -> new LinkedHashMap<>());
+                for (Element v : children(f, "value")) values.put(v.getAttribute("enum"), v.getAttribute("description"));
             }
         }
         Element componentsEl = child(root, "components");
         if (componentsEl != null) {
-            for (Element c : children(componentsEl, "component")) {
-                componentElements.put(c.getAttribute("name"), c);
-            }
-            for (String name : componentElements.keySet()) {
-                component(name);
-            }
+            for (Element c : children(componentsEl, "component")) componentElements.put(c.getAttribute("name"), c);
         }
-        FieldList header = new FieldList(members(child(root, "header"), true));
-        FieldList trailer = new FieldList(members(child(root, "trailer"), true));
-        Map<String, MessageDef> messages = new LinkedHashMap<>();
         Element messagesEl = child(root, "messages");
         if (messagesEl != null) {
-            for (Element m : children(messagesEl, "message")) {
-                String type = m.getAttribute("msgtype");
-                messages.put(type, new MessageDef(type, m.getAttribute("name"), m.getAttribute("msgcat"), members(m, true)));
+            for (Element m : children(messagesEl, "message")) messageElements.put(m.getAttribute("msgtype"), m);
+        }
+        mergeEntries(headerEntries, child(root, "header"), false);
+        mergeEntries(trailerEntries, child(root, "trailer"), true);
+    }
+
+    /** Header or trailer: an entry with the same name replaces the earlier one in place; a new one is added. */
+    private static void mergeEntries(List<Element> into, Element section, boolean beforeCheckSum) {
+        if (section == null) return;
+        for (Node n = section.getFirstChild(); n != null; n = n.getNextSibling()) {
+            if (!(n instanceof Element)) continue;
+            Element e = (Element) n;
+            int existing = -1;
+            for (int i = 0; i < into.size(); i++) {
+                if (into.get(i).getTagName().equals(e.getTagName()) && into.get(i).getAttribute("name").equals(e.getAttribute("name"))) {
+                    existing = i;
+                    break;
+                }
+            }
+            if (existing >= 0) {
+                into.set(existing, e);
+            } else {
+                int at = into.size();
+                if (beforeCheckSum) {
+                    for (int i = 0; i < into.size(); i++) {
+                        if ("CheckSum".equals(into.get(i).getAttribute("name"))) {
+                            at = i;
+                            break;
+                        }
+                    }
+                }
+                into.add(at, e);
             }
         }
-        return new Dictionary(beginString(root), label, fields, messages, components, header, trailer);
+    }
+
+    // --- building ---
+
+    private Dictionary build(String label) {
+        for (Map.Entry<Integer, Element> e : fieldElements.entrySet()) {
+            Element f = e.getValue();
+            fields.put(e.getKey(), new FieldDef(e.getKey(), f.getAttribute("name"), f.getAttribute("type"), fieldValues.get(e.getKey())));
+        }
+        for (String name : componentElements.keySet()) component(name);
+        FieldList header = new FieldList(members(headerEntries, true));
+        FieldList trailer = new FieldList(members(trailerEntries, true));
+        Map<String, MessageDef> messages = new LinkedHashMap<>();
+        for (Map.Entry<String, Element> e : messageElements.entrySet()) {
+            Element m = e.getValue();
+            messages.put(e.getKey(), new MessageDef(e.getKey(), m.getAttribute("name"), m.getAttribute("msgcat"), members(elements(m), true)));
+        }
+        return new Dictionary(beginString, label, fields, messages, components, header, trailer);
     }
 
     private FieldDef fieldByName(String name) {
-        FieldDef f = fieldsByName.get(name);
-        if (f == null && base != null) f = base.field(name);
-        return f;
+        Integer n = numberByName.get(name);
+        return n == null ? null : fields.get(n);
     }
 
     private List<MemberDef> component(String name) {
         List<MemberDef> done = components.get(name);
         if (done != null) return done;
         Element el = componentElements.get(name);
-        if (el == null) {
-            return base == null ? null : base.components().get(name);
-        }
+        if (el == null) return null;
         if (!resolving.add(name)) return new ArrayList<>();   // a component that contains itself: stop
-        List<MemberDef> list = members(el, true);
+        List<MemberDef> list = members(elements(el), true);
         resolving.remove(name);
         components.put(name, list);
         return list;
     }
 
-    /** The members of a header, trailer, message, group or component element, with components inlined. */
-    private List<MemberDef> members(Element parent, boolean parentRequired) {
+    /** The members described by header, trailer, message, group or component entries, with components inlined. */
+    private List<MemberDef> members(List<Element> entries, boolean parentRequired) {
         List<MemberDef> out = new ArrayList<>();
-        if (parent == null) return out;
         Set<Integer> seen = new HashSet<>();
-        for (Node n = parent.getFirstChild(); n != null; n = n.getNextSibling()) {
-            if (!(n instanceof Element)) continue;
-            Element e = (Element) n;
+        for (Element e : entries) {
             boolean required = parentRequired && "Y".equalsIgnoreCase(e.getAttribute("required"));
             String name = e.getAttribute("name");
             switch (e.getTagName()) {
@@ -163,7 +240,7 @@ public final class DictionaryParser {
                 case "group": {
                     FieldDef count = fieldByName(name);
                     if (count == null) break;
-                    List<MemberDef> inner = members(e, true);
+                    List<MemberDef> inner = members(elements(e), true);
                     if (inner.isEmpty()) break;
                     if (seen.add(count.number())) out.add(new MemberDef(count, required, new GroupDef(count, inner)));
                     break;
@@ -179,6 +256,14 @@ public final class DictionaryParser {
                 default:
                     break;
             }
+        }
+        return out;
+    }
+
+    private static List<Element> elements(Element parent) {
+        List<Element> out = new ArrayList<>();
+        for (Node n = parent.getFirstChild(); n != null; n = n.getNextSibling()) {
+            if (n instanceof Element) out.add((Element) n);
         }
         return out;
     }

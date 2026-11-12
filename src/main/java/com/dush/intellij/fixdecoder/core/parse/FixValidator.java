@@ -41,6 +41,8 @@ final class FixValidator {
         for (RawField f : m.fields()) {
             FieldDef d = m.dictionary().field(f.tag());
             if (d == null || !d.isEnumerated() || f.value().isEmpty() || f.value().indexOf(FixScanner.UNKNOWN) >= 0) continue;
+            // MsgType values starting with U are user-defined messages (FIX reserves them for that)
+            if (f.tag() == 35 && f.value().startsWith("U")) continue;
             if (d.meaning(f.value()) == null) {
                 m.addProblem(new Problem(Problem.Kind.ENUM_VALUE, f, f.start(), f.end(),
                         "'" + f.value() + "' is not a valid value for " + FixParser.describe(d), -1));

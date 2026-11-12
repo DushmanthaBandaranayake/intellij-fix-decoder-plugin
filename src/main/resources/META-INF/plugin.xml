@@ -20,6 +20,10 @@
                 paste a message from a log into Java code</li>
             <li><b>Custom dictionaries</b> (QuickFIX/J XML) for venue-specific tags and values</li>
         </ul>
+        <p><img src="https://raw.githubusercontent.com/DushmanthaBandaranayake/intellij-fix-decoder-plugin/master/docs/images/fix-decoder-decode.gif" width="700"
+                alt="Hovering a FIX field shows its name and meaning; Decode FIX message shows the message as a table whose values link to the code"></p>
+        <p><img src="https://raw.githubusercontent.com/DushmanthaBandaranayake/intellij-fix-decoder-plugin/master/docs/images/fix-decoder-validate.gif" width="700"
+                alt="A broken repeating group and wrong BodyLength and CheckSum are underlined in red and fixed with Alt+Enter"></p>
         <p>Bundles the FIX 4.2, FIX 4.4, FIX 5.0 SP2 and FIXT 1.1 dictionaries. Settings are in
         <b>Settings | Tools | FIX Decoder</b>.</p>
         <p>This product includes software developed by quickfixengine.org (http://www.quickfixengine.org/):
@@ -28,7 +32,20 @@
     ]]></description>
 
     <change-notes><![CDATA[
-        <p>1.0.0: first release.</p>
+        <p><b>1.0.1-beta</b></p>
+        <ul>
+            <li>Search in the decoder table (Ctrl+F): highlights matching tags, names, values and meanings; Enter and the arrow keys jump between matches</li>
+            <li>Flat list view of the decoded message, without nested repeating groups</li>
+            <li>Settings button in the decoder toolbar; inline hints are now off by default</li>
+            <li>Hover in Java uses IntelliJ's own documentation popup, so it no longer shows "No documentation found" on top</li>
+            <li>Alt+Enter: Decode FIX message</li>
+            <li>Custom dictionaries: a redefined component (such as Parties) now applies to every message that uses it, a custom
+                header adds to the standard one, and custom enum values are added to the standard ones</li>
+            <li>Repeating groups: a tag that isn't defined for the group stays in its instance instead of ending the group;
+                custom message types (35=U...) pick the group layout that fits</li>
+            <li>Fixes: an error when marking files with problems in 2026.1 and later, and an empty row at the top of the table</li>
+        </ul>
+        <p><b>1.0.0-beta</b>: first release, for early feedback.</p>
     ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>

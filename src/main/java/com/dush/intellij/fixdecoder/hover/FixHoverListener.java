@@ -1,5 +1,6 @@
 package com.dush.intellij.fixdecoder.hover;
 
+import com.dush.intellij.fixdecoder.core.parse.FixMessage;
 import com.dush.intellij.fixdecoder.core.parse.RawField;
 import com.dush.intellij.fixdecoder.extract.FixMessages;
 import com.dush.intellij.fixdecoder.extract.FoundMessage;
@@ -13,17 +14,20 @@ import com.intellij.openapi.editor.event.EditorMouseEvent;
 import com.intellij.openapi.editor.event.EditorMouseEventArea;
 import com.intellij.openapi.editor.event.EditorMouseListener;
 import com.intellij.openapi.editor.event.EditorMouseMotionListener;
+import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiFile;
 import com.intellij.ui.awt.RelativePoint;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.JComponent;
 import javax.swing.Timer;
 import javax.swing.event.HyperlinkEvent;
+import javax.swing.event.HyperlinkListener;
 import java.awt.Point;
 
 /**
@@ -38,6 +42,8 @@ import java.awt.Point;
  */
 public final class FixHoverListener implements EditorMouseMotionListener, EditorMouseListener {
     private static final int DELAY_MS = 450;
+    /** Wider popups wrap at this width. */
+    private static final int MAX_WIDTH = 440;
 
     private static Timer timer;
     private static Editor pendingEditor;
@@ -72,14 +78,16 @@ public final class FixHoverListener implements EditorMouseMotionListener, Editor
         cancelPending();
     }
 
-    /** What the popup shows for the field at an offset. Built in the background. */
+    /** The field at an offset. Found in the background; the message is plain data, safe to use on the UI thread. */
     private static final class Hit {
-        final String html;
+        final FixMessage message;
+        final RawField field;
         final TextRange range;
         final long stamp;
 
-        Hit(String html, TextRange range, long stamp) {
-            this.html = html;
+        Hit(FixMessage message, RawField field, TextRange range, long stamp) {
+            this.message = message;
+            this.field = field;
             this.range = range;
             this.stamp = stamp;
         }
@@ -106,18 +114,23 @@ public final class FixHoverListener implements EditorMouseMotionListener, Editor
     }
 
     private static Hit hit(PsiFile file, Document document, int offset) {
+        // In Java, IntelliJ's own hover documentation shows the field (FixDocumentationProvider) when it is switched on;
+        // a second popup from here would cover it.
+        if ("JAVA".equals(file.getLanguage().getID()) && EditorSettingsExternalizable.getInstance().isShowQuickDocOnMouseOverElement()) {
+            return null;
+        }
         FoundMessage m = FixMessages.at(file, offset);
         RawField f = m == null ? null : m.fieldAt(offset);
         if (f == null) return null;
         TextRange r = m.fieldRange(f);
-        return new Hit(FieldInfo.html(m.message(), f), r, document.getModificationStamp());
+        return new Hit(m.message(), f, r, document.getModificationStamp());
     }
 
     private static void show(Project project, Editor editor, int offset, Hit hit) {
         pendingEditor = null;
         pendingOffset = -1;
         hide();
-        JComponent label = HintUtil.createInformationLabel(hit.html, e -> {
+        HyperlinkListener links = e -> {
             if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED && FieldInfo.DECODE_LINK.equals(e.getDescription())) {
                 hide();
                 // Leave the hyperlink event first: opening the tool window is not allowed from inside it.
@@ -125,7 +138,12 @@ public final class FixHoverListener implements EditorMouseMotionListener, Editor
                     if (!editor.isDisposed() && !project.isDisposed()) FixDecoderToolWindow.decode(project, editor, offset);
                 });
             }
-        }, null, null);
+        };
+        JComponent label = HintUtil.createInformationLabel(FieldInfo.html(hit.message, hit.field), links, null, null);
+        if (label.getPreferredSize().width > JBUI.scale(MAX_WIDTH)) {
+            // long lines, such as many allowed values: wrap them
+            label = HintUtil.createInformationLabel(FieldInfo.html(hit.message, hit.field, true, MAX_WIDTH), links, null, null);
+        }
         JBPopup p = JBPopupFactory.getInstance().createComponentPopupBuilder(label, null)
                 .setRequestFocus(false)
                 .setFocusable(false)

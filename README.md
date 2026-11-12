@@ -4,12 +4,16 @@ An IntelliJ plugin for FIX protocol messages written in Java code (string litera
 
 ## Features
 
-- **Hover**: rest the mouse on a field to see its tag name, type, the meaning of its value (`54=1` is Buy), the other allowed values, its group and instance, and whether the message type requires it. The popup has a *Decode message* link.
+![Hover a field, decode the message into a table, click values to find them in the code](docs/images/fix-decoder-decode.gif)
+
+![Broken repeating group and wrong BodyLength and CheckSum, fixed with Alt+Enter](docs/images/fix-decoder-validate.gif)
+
+- **Hover**: rest the mouse on a field to see its tag name, type, the meaning of its value (`54=1` is Buy), the other allowed values, its group and instance, and whether the message type requires it. In Java the details appear in IntelliJ's own documentation popup (hover or Ctrl+Q), so there is only one popup; in plain text, and in Java when hover documentation is off, the plugin shows its own popup, which also has a *Decode message* link.
 - **Decoder tool window**: *Decode FIX Message* (editor context menu, `Ctrl+Alt+Shift+F`) shows the message at the caret in a tree table with the columns Tag, Name, Value and Meaning. Repeating groups are shown as numbered instances.
   - Clicking a value selects it in the editor; clicking the tag selects the `tag=` part. The focus stays in the table, so you can use the arrow keys.
   - Double-click or Enter moves the focus to the editor.
   - Moving the caret in the editor selects the matching row.
-  - The table follows edits to the message. The toolbar can refresh it, copy the message as readable text, decode a message you paste, and open the FIX Decoder settings.
+  - The table follows edits to the message. The toolbar can refresh it, copy the message as readable text, decode a message you paste, switch to a flat list (every field in message order, repeating groups not nested), and open the FIX Decoder settings. The search box (Ctrl+F, or your Find shortcut) highlights the fields whose tag, name, value or meaning match, without hiding any rows. Enter or Down jumps to the next match, Shift+Enter or Up to the previous one (F3 and Shift+F3 work from the table too), and Esc clears it.
 - **Inspections** (Settings | Editor | Inspections | FIX Decoder): every problem is an error, a red underline on the whole field (`tag=value`) it is about. You can lower the level of any of them in the inspection settings.
   - *Repeating group is broken*: the count doesn't match the instances found, an instance doesn't start with the group's first field, a field is out of order or repeated, or an unknown tag ends a group early. Quick fix: *Set count to N*.
   - *BodyLength or CheckSum is wrong*. Quick fix: *Recompute BodyLength and CheckSum*.

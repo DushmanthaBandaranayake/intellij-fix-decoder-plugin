@@ -18,10 +18,19 @@ public final class FieldInfo {
     private FieldInfo() {
     }
 
+    /** For the plugin's own hover popup: with the Decode link, any width. */
     public static String html(FixMessage m, RawField f) {
+        return html(m, f, true, 0);
+    }
+
+    /**
+     * @param decodeLink whether to end with a "Decode message" link (only the plugin's own popup can follow it)
+     * @param width      wrap at this many pixels; 0 for no limit
+     */
+    public static String html(FixMessage m, RawField f, boolean decodeLink, int width) {
         FieldDef def = m.dictionary().field(f.tag());
         FixNode.FieldNode node = m.node(f.index());
-        StringBuilder sb = new StringBuilder("<html><body style='padding:2px 4px'>");
+        StringBuilder sb = new StringBuilder("<html><body style='padding:2px 4px").append(width > 0 ? ";width:" + width + "px" : "").append("'>");
         sb.append("<b>").append(f.tag()).append("</b>&nbsp;&nbsp;");
         if (def == null) {
             sb.append("<i>Unknown tag</i><br>");
@@ -41,7 +50,8 @@ public final class FieldInfo {
         for (Problem p : m.problemsAt(f)) {
             sb.append("<span style='color:#d9534f'>").append(esc(p.message())).append("</span><br>");
         }
-        sb.append(gray(esc(m.dictionary().label()))).append("&nbsp;&nbsp;<a href='").append(DECODE_LINK).append("'>Decode message</a>");
+        sb.append(gray(esc(m.dictionary().label())));
+        if (decodeLink) sb.append("&nbsp;&nbsp;<a href='").append(DECODE_LINK).append("'>Decode message</a>");
         return sb.append("</body></html>").toString();
     }
 
