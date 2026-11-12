@@ -1,5 +1,6 @@
 package com.dush.intellij.fixdecoder.core.dictionary;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -9,7 +10,7 @@ import java.util.Map;
 
 /**
  * A FIX data dictionary: fields, header, trailer and messages, with components already flattened.
- * Instances are not changed after they are built; {@link #overlay} and {@link #combine} return new ones.
+ * Instances are not changed after they are built; {@link #combine} returns a new one.
  */
 public final class Dictionary {
     private final String beginString;
@@ -20,8 +21,8 @@ public final class Dictionary {
     private final Map<String, List<MemberDef>> components;
     private final FieldList header;
     private final FieldList trailer;
-    /** Count tag to a group definition, for messages whose type is unknown. The first definition found wins. */
-    private final Map<Integer, GroupDef> anyGroup = new HashMap<>();
+    /** Count tag to every distinct group definition with that count tag, for messages whose type is unknown. */
+    private final Map<Integer, List<GroupDef>> groupsByCount = new HashMap<>();
 
     Dictionary(String beginString, String label, Map<Integer, FieldDef> fields, Map<String, MessageDef> messages,
                Map<String, List<MemberDef>> components, FieldList header, FieldList trailer) {
@@ -43,10 +44,19 @@ public final class Dictionary {
     private void collectGroups(FieldList list) {
         for (MemberDef m : list.members()) {
             if (m.group() != null) {
-                anyGroup.putIfAbsent(m.tag(), m.group());
+                List<GroupDef> defs = groupsByCount.computeIfAbsent(m.tag(), k -> new ArrayList<>());
+                if (defs.stream().noneMatch(d -> sameMembers(d, m.group()))) defs.add(m.group());
                 collectGroups(m.group());
             }
         }
+    }
+
+    private static boolean sameMembers(GroupDef a, GroupDef b) {
+        if (a.members().size() != b.members().size()) return false;
+        for (int i = 0; i < a.members().size(); i++) {
+            if (a.members().get(i).tag() != b.members().get(i).tag()) return false;
+        }
+        return true;
     }
 
     /** BeginString value this dictionary is for, e.g. {@code FIX.4.4} or {@code FIXT.1.1}. Empty for a partial custom file. */
@@ -87,30 +97,20 @@ public final class Dictionary {
         return trailer;
     }
 
-    /** A group definition with this count tag from any message; null when no message has such a group. */
-    public GroupDef anyGroup(int countTag) {
-        return anyGroup.get(countTag);
-    }
-
-    Map<String, List<MemberDef>> components() {
-        return components;
-    }
-
     /**
-     * Returns a copy with {@code custom} laid over this one: its fields and messages are added, and replace definitions
-     * with the same tag number or MsgType. A non-empty custom header or trailer replaces this one's.
+     * For a message whose type is unknown: the group definition with this count tag that fits the field that follows
+     * the count (its first field, or else any of its fields); the first one found when none fits; null when no message
+     * has such a group. Messages define the same count tag differently (NoMDEntries starts with 269 in a snapshot and
+     * with 279 in an incremental refresh), so the next field decides.
      */
-    public Dictionary overlay(Dictionary custom, String customName) {
-        Map<Integer, FieldDef> f = new LinkedHashMap<>(fields);
-        f.putAll(custom.fields);
-        Map<String, MessageDef> m = new LinkedHashMap<>(messages);
-        m.putAll(custom.messages);
-        Map<String, List<MemberDef>> c = new LinkedHashMap<>(components);
-        c.putAll(custom.components);
-        FieldList h = custom.header.members().isEmpty() ? header : custom.header;
-        FieldList t = custom.trailer.members().isEmpty() ? trailer : custom.trailer;
-        return new Dictionary(beginString, label + " + " + customName, f, m, c, h, t);
+    public GroupDef groupFor(int countTag, int nextTag) {
+        List<GroupDef> defs = groupsByCount.get(countTag);
+        if (defs == null || defs.isEmpty()) return null;
+        for (GroupDef d : defs) if (d.delimiterTag() == nextTag) return d;
+        for (GroupDef d : defs) if (d.contains(nextTag)) return d;
+        return defs.get(0);
     }
+
 
     /** FIXT: the session layer (header, trailer, admin messages) from {@code transport}, everything else from {@code app}. */
     public static Dictionary combine(Dictionary transport, Dictionary app) {

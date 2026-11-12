@@ -12,12 +12,14 @@ import com.dush.intellij.fixdecoder.extract.FoundMessage;
 import com.dush.intellij.fixdecoder.settings.FixDecoderConfigurable;
 import com.dush.intellij.fixdecoder.settings.FixDictionaries;
 import com.intellij.icons.AllIcons;
+import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.ActionToolbar;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.actionSystem.ToggleAction;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -41,7 +43,10 @@ import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
+import com.intellij.openapi.actionSystem.CommonShortcuts;
 import com.intellij.ui.ColoredTableCellRenderer;
+import com.intellij.ui.DocumentAdapter;
+import com.intellij.ui.SearchTextField;
 import com.intellij.ui.ColoredTreeCellRenderer;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.ScrollPaneFactory;
@@ -67,6 +72,7 @@ import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.TreePath;
 import java.awt.BorderLayout;
 import java.awt.datatransfer.StringSelection;
+import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -88,10 +94,20 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
 
     private final Project project;
     private final JBLabel header = new JBLabel();
+    /**
+     * Highlights the fields whose tag, name, value or meaning contain the text; nothing is hidden. Ctrl+F (the Find
+     * shortcut) focuses it, Enter and Shift+Enter move between the matches.
+     */
+    private final SearchTextField search = new SearchTextField(false);
+    /** The rows that match the search, top to bottom. */
+    private final List<TreePath> matches = new ArrayList<>();
+    private int currentMatch = -1;
     private final TreeTableView table;
     private final List<Row> rows = new ArrayList<>();
 
     private FixMessage message;
+    /** The message shown, with its document ranges; null for pasted text. Kept to redraw when the view changes. */
+    private FoundMessage shownFound;
     private Document document;
     private RangeMarker messageMarker;
     private Disposable documentDisposable;
@@ -125,6 +141,15 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
             this.valueMarker = valueMarker;
         }
 
+        /** {@code filter} is lower case. */
+        boolean matches(String filter) {
+            return !instance && (contains(tag, filter) || contains(name, filter) || contains(value, filter) || contains(meaning, filter));
+        }
+
+        private static boolean contains(String text, String filter) {
+            return text != null && text.toLowerCase(java.util.Locale.ROOT).contains(filter);
+        }
+
         @Override
         public String toString() {
             return tag;
@@ -143,7 +168,7 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
             public void customizeCellRenderer(@NotNull JTree tree, Object value, boolean selected, boolean expanded,
                                               boolean leaf, int row, boolean hasFocus) {
                 Row r = row(value);
-                if (r != null) append(r.tag, r.instance ? SimpleTextAttributes.GRAYED_ATTRIBUTES : SimpleTextAttributes.REGULAR_ATTRIBUTES);
+                if (r != null) appendHighlighted(this, r, r.tag, r.instance ? SimpleTextAttributes.GRAYED_ATTRIBUTES : SimpleTextAttributes.REGULAR_ATTRIBUTES);
             }
         });
         table.getEmptyText().setText("Put the caret in a FIX message and choose Decode FIX Message,")
@@ -154,7 +179,11 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         top.add(toolbar().getComponent(), BorderLayout.WEST);
         header.setBorder(JBUI.Borders.emptyLeft(8));
         top.add(header, BorderLayout.CENTER);
+        search.getTextEditor().getEmptyText().setText("Search tag, name, value");
+        search.setPreferredSize(new java.awt.Dimension(JBUI.scale(220), search.getPreferredSize().height));
+        top.add(search, BorderLayout.EAST);
         add(top, BorderLayout.NORTH);
+        installSearch();
         add(ScrollPaneFactory.createScrollPane(table), BorderLayout.CENTER);
         setColumnWidths();
 
@@ -166,10 +195,121 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         }, this);
     }
 
+    private void installSearch() {
+        search.addDocumentListener(new DocumentAdapter() {
+            @Override
+            protected void textChanged(@NotNull javax.swing.event.DocumentEvent e) {
+                if (message != null) applySearch(true);
+            }
+        });
+        // IDE shortcuts rather than a key listener: the action system and the search field's own key handling
+        // would otherwise take Enter, Up/Down and Esc first.
+        JComponent box = search.getTextEditor();
+        // Enter jumps to the next match and wraps; Shift+Enter goes back. The focus stays in the box.
+        shortcut(box, () -> moveMatch(1), KeyEvent.VK_ENTER, 0, KeyEvent.VK_DOWN, 0);
+        shortcut(box, () -> moveMatch(-1), KeyEvent.VK_ENTER, InputEvent.SHIFT_DOWN_MASK, KeyEvent.VK_UP, 0);
+        // F3 / Shift+F3 anywhere in the decoder, also from the table
+        shortcut(this, () -> moveMatch(1), KeyEvent.VK_F3, 0);
+        shortcut(this, () -> moveMatch(-1), KeyEvent.VK_F3, InputEvent.SHIFT_DOWN_MASK);
+        // first Esc clears the search, the next one goes back to the table
+        shortcut(box, () -> {
+            if (!search.getText().isEmpty()) search.setText("");
+            else table.requestFocusInWindow();
+        }, KeyEvent.VK_ESCAPE, 0);
+        // Ctrl+F (whatever the Find shortcut is in the keymap) anywhere in the decoder goes to the search box
+        new AnAction() {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                focusSearch();
+            }
+        }.registerCustomShortcutSet(CommonShortcuts.getFind(), this, this);
+    }
+
+    /** Runs {@code run} for the given keys (pairs of key code and modifiers) while the focus is in {@code on}. */
+    private void shortcut(JComponent on, Runnable run, int... keysAndModifiers) {
+        com.intellij.openapi.actionSystem.Shortcut[] shortcuts = new com.intellij.openapi.actionSystem.Shortcut[keysAndModifiers.length / 2];
+        for (int i = 0; i < shortcuts.length; i++) {
+            shortcuts[i] = new com.intellij.openapi.actionSystem.KeyboardShortcut(
+                    KeyStroke.getKeyStroke(keysAndModifiers[2 * i], keysAndModifiers[2 * i + 1]), null);
+        }
+        new com.intellij.openapi.project.DumbAwareAction() {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                run.run();
+            }
+        }.registerCustomShortcutSet(new com.intellij.openapi.actionSystem.CustomShortcutSet(shortcuts), on, this);
+    }
+
+    void focusSearch() {
+        search.requestFocusInWindow();
+        search.selectText();
+    }
+
+    private String filter() {
+        return search.getText().trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /** Finds the matching rows again and repaints; {@code select} moves the selection to the first match. */
+    private void applySearch(boolean select) {
+        matches.clear();
+        currentMatch = -1;
+        String filter = filter();
+        if (!filter.isEmpty()) {
+            DefaultMutableTreeNode root = (DefaultMutableTreeNode) table.getTree().getModel().getRoot();
+            for (java.util.Enumeration<?> e = root.preorderEnumeration(); e.hasMoreElements(); ) {
+                DefaultMutableTreeNode n = (DefaultMutableTreeNode) e.nextElement();
+                Row r = row(n);
+                if (r != null && r.matches(filter)) matches.add(new TreePath(n.getPath()));
+            }
+        }
+        if (select && !matches.isEmpty()) selectMatch(0);
+        table.repaint();
+        updateHeader(shownFound);
+    }
+
+    private void moveMatch(int step) {
+        if (matches.isEmpty()) return;
+        int from = currentMatch < 0 ? (step > 0 ? -1 : 0) : currentMatch;
+        selectMatch(Math.floorMod(from + step, matches.size()));
+    }
+
+    private void selectMatch(int i) {
+        currentMatch = i;
+        int row = table.getTree().getRowForPath(matches.get(i));
+        if (row >= 0) {
+            table.getSelectionModel().setSelectionInterval(row, row);
+            table.scrollRectToVisible(table.getCellRect(row, 0, true));
+        }
+        updateHeader(shownFound);
+    }
+
+    /** Appends {@code text}, marking the parts that match the search the way the IDE marks speed search matches. */
+    private void appendHighlighted(com.intellij.ui.SimpleColoredComponent c, Row r, String text, SimpleTextAttributes attrs) {
+        String filter = filter();
+        if (filter.isEmpty() || !r.matches(filter)) {
+            c.append(text, attrs);
+            return;
+        }
+        SimpleTextAttributes match = new SimpleTextAttributes(attrs.getBgColor(), attrs.getFgColor(), null,
+                attrs.getStyle() | SimpleTextAttributes.STYLE_SEARCH_MATCH);
+        int from = 0;
+        for (int i = 0; i + filter.length() <= text.length(); ) {
+            if (text.regionMatches(true, i, filter, 0, filter.length())) {
+                if (i > from) c.append(text.substring(from, i), attrs);
+                c.append(text.substring(i, i + filter.length()), match);
+                i += filter.length();
+                from = i;
+            } else {
+                i++;
+            }
+        }
+        if (from < text.length()) c.append(text.substring(from), attrs);
+    }
+
     private ListTreeTableModelOnColumns model(DefaultMutableTreeNode root) {
         ColumnInfo<?, ?>[] columns = {
                 new TreeColumnInfo("Tag"),
-                new TextColumn("Name", r -> r.name, null),
+                new TextColumn("Name", r -> r.name, this::nameRenderer),
                 new TextColumn("Value", r -> r.value, this::valueRenderer),
                 new TextColumn("Meaning", r -> r.meaning, this::meaningRenderer),
         };
@@ -192,11 +332,33 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         }));
         group.add(new PanelAction("Paste Message", "Decode a message from text you paste", AllIcons.Actions.MenuPaste, this::askForMessage));
         group.addSeparator();
+        group.add(new FlatToggle());
         group.add(new PanelAction("Settings", "Open Settings | Tools | FIX Decoder", AllIcons.General.Settings,
                 () -> ShowSettingsUtil.getInstance().showSettingsDialog(project, FixDecoderConfigurable.class)));
         ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar("FixDecoderToolbar", group, true);
         toolbar.setTargetComponent(this);
         return toolbar;
+    }
+
+    /**
+     * Switches between the grouped tree and a flat list. UpdateInBackground (see MessageAtCaretAction) because a
+     * toggle's update() reads its state, and newer IDEs want every action that updates to say on which thread.
+     */
+    @SuppressWarnings("removal")
+    private final class FlatToggle extends ToggleAction implements DumbAware, com.intellij.openapi.actionSystem.UpdateInBackground {
+        FlatToggle() {
+            super("Show as Flat List", "Show every field in message order, without nesting repeating groups", AllIcons.ObjectBrowser.FlattenPackages);
+        }
+
+        @Override
+        public boolean isSelected(@NotNull AnActionEvent e) {
+            return isFlat();
+        }
+
+        @Override
+        public void setSelected(@NotNull AnActionEvent e, boolean state) {
+            setFlat(state);
+        }
     }
 
     private static final class PanelAction extends AnAction implements DumbAware {
@@ -295,13 +457,18 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         }
         rows.clear();
         message = m;
+        shownFound = found;
         stale = false;
         DefaultMutableTreeNode root = new DefaultMutableTreeNode();
-        addNodes(root, m.nodes(), found);
+        if (isFlat()) addFlat(root, m, found);
+        else addNodes(root, m.nodes(), found);
         table.setModel(model(root));
+        // a new model shows its root again; the root is only a holder for the rows
+        table.setRootVisible(false);
+        table.getTree().setShowsRootHandles(true);
         setColumnWidths();
         TreeUtil.expandAll(table.getTree());
-        updateHeader(found);
+        applySearch(false);
     }
 
     private void addNodes(DefaultMutableTreeNode parent, List<FixNode> nodes, @Nullable FoundMessage found) {
@@ -322,6 +489,41 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
                 parent.add(fieldNode((FixNode.FieldNode) n, found, null));
             }
         }
+    }
+
+    /** Flat list: every field in message order; a group's count field still says how many instances were found. */
+    private void addFlat(DefaultMutableTreeNode root, FixMessage m, @Nullable FoundMessage found) {
+        java.util.Map<Integer, Integer> instances = new java.util.HashMap<>();
+        collectGroupSizes(m.nodes(), instances);
+        for (RawField f : m.fields()) {
+            FixNode.FieldNode n = m.node(f.index());
+            if (n == null) continue;
+            Integer count = instances.get(f.index());
+            String groupMeaning = count == null ? null : count + (count == 1 ? " instance" : " instances");
+            root.add(fieldNode(n, found, groupMeaning));
+        }
+    }
+
+    private static void collectGroupSizes(List<FixNode> nodes, java.util.Map<Integer, Integer> out) {
+        for (FixNode n : nodes) {
+            if (!(n instanceof FixNode.GroupNode)) continue;
+            FixNode.GroupNode g = (FixNode.GroupNode) n;
+            out.put(g.count().field().index(), g.instances().size());
+            for (FixNode.Instance inst : g.instances()) collectGroupSizes(inst.children(), out);
+        }
+    }
+
+    // --- flat or grouped view, remembered for the whole IDE ---
+
+    private static final String FLAT_KEY = "com.dush.fixdecoder.flatView";
+
+    static boolean isFlat() {
+        return PropertiesComponent.getInstance().getBoolean(FLAT_KEY, false);
+    }
+
+    void setFlat(boolean flat) {
+        PropertiesComponent.getInstance().setValue(FLAT_KEY, flat, false);
+        if (message != null) build(message, shownFound);
     }
 
     private DefaultMutableTreeNode fieldNode(FixNode.FieldNode n, @Nullable FoundMessage found, @Nullable String groupMeaning) {
@@ -356,6 +558,11 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         }
         int problems = message.problems().size();
         if (problems > 0) sb.append(" · ").append(problems).append(problems == 1 ? " problem" : " problems");
+        if (!filter().isEmpty()) {
+            if (matches.isEmpty()) sb.append(" · no matches");
+            else if (currentMatch >= 0) sb.append(" · match ").append(currentMatch + 1).append(" of ").append(matches.size());
+            else sb.append(" · ").append(matches.size()).append(matches.size() == 1 ? " match" : " matches");
+        }
         if (stale) sb.append(" · changed, no longer a FIX message");
         header.setText(sb.toString());
         header.setForeground(stale ? JBColor.RED : null);
@@ -496,7 +703,7 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
             protected void customizeCellRenderer(@NotNull JTable t, Object value, boolean selected, boolean hasFocus, int row, int column) {
                 if (value == null) return;
                 boolean link = r.valueMarker != null && !r.instance;
-                append(String.valueOf(value), link && !selected ? SimpleTextAttributes.LINK_ATTRIBUTES : SimpleTextAttributes.REGULAR_ATTRIBUTES);
+                appendHighlighted(this, r, String.valueOf(value), link && !selected ? SimpleTextAttributes.LINK_ATTRIBUTES : SimpleTextAttributes.REGULAR_ATTRIBUTES);
             }
         };
     }
@@ -508,10 +715,19 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
                 if (value == null) return;
                 if (r.problem) {
                     setIcon(AllIcons.General.Warning);
-                    append(String.valueOf(value), SimpleTextAttributes.ERROR_ATTRIBUTES);
+                    appendHighlighted(this, r, String.valueOf(value), SimpleTextAttributes.ERROR_ATTRIBUTES);
                 } else {
-                    append(String.valueOf(value), SimpleTextAttributes.GRAYED_ATTRIBUTES);
+                    appendHighlighted(this, r, String.valueOf(value), SimpleTextAttributes.GRAYED_ATTRIBUTES);
                 }
+            }
+        };
+    }
+
+    private TableCellRenderer nameRenderer(Row r) {
+        return new ColoredTableCellRenderer() {
+            @Override
+            protected void customizeCellRenderer(@NotNull JTable t, Object value, boolean selected, boolean hasFocus, int row, int column) {
+                if (value != null) appendHighlighted(this, r, String.valueOf(value), SimpleTextAttributes.REGULAR_ATTRIBUTES);
             }
         };
     }
@@ -548,6 +764,48 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
 
     List<Row> rows() {
         return rows;
+    }
+
+    void setSearchText(String text) {
+        search.setText(text);
+    }
+
+    /** The tags of the rows that match the search, top to bottom. */
+    List<String> matchedTags() {
+        List<String> out = new ArrayList<>();
+        for (TreePath p : matches) out.add(row(p.getLastPathComponent()).tag);
+        return out;
+    }
+
+    /** The selected row, or null. */
+    Row selectedRow() {
+        int row = table.getSelectedRow();
+        return row < 0 ? null : rowAt(row);
+    }
+
+    void nextMatch(int step) {
+        moveMatch(step);
+    }
+
+    /** The tags of the rows shown, top to bottom. */
+    List<String> shownTags() {
+        List<String> out = new ArrayList<>();
+        javax.swing.tree.TreeModel model = table.getTree().getModel();
+        collectShown((DefaultMutableTreeNode) model.getRoot(), out);
+        return out;
+    }
+
+    private static void collectShown(DefaultMutableTreeNode node, List<String> out) {
+        for (int i = 0; i < node.getChildCount(); i++) {
+            DefaultMutableTreeNode c = (DefaultMutableTreeNode) node.getChildAt(i);
+            Row r = row(c);
+            if (r != null) out.add(r.tag);
+            collectShown(c, out);
+        }
+    }
+
+    boolean isRootVisible() {
+        return table.getTree().isRootVisible();
     }
 
     boolean isStale() {

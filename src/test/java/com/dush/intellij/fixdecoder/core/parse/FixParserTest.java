@@ -110,7 +110,14 @@ public class FixParserTest {
     @Test
     public void instanceWithoutDelimiter() {
         FixMessage m = parse("35=D|453=1|452=11|448=A|55=IBM|");
-        assertTrue(kinds(m).contains(Problem.Kind.GROUP_MISSING_DELIMITER));
+        assertEquals("[GROUP_MISSING_DELIMITER]", kinds(m).toString());
+
+        // the first instance takes the next PartyID in, rather than becoming a third instance
+        m = parse("35=D|453=2|452=11|448=A|448=B|452=24|55=IBM|");
+        assertEquals("[GROUP_MISSING_DELIMITER]", kinds(m).toString());
+        FixNode.GroupNode g = group(m, 453);
+        assertEquals(2, g.instances().size());
+        assertEquals(2, g.instances().get(0).children().size());
     }
 
     @Test
@@ -124,9 +131,46 @@ public class FixParserTest {
     }
 
     @Test
-    public void unknownTagEndsGroup() {
-        FixMessage m = parse("35=D|453=2|448=A|5999=x|448=B|55=IBM|");
-        assertEquals("[GROUP_COUNT, GROUP_UNKNOWN_TAG]", kinds(m).toString());
+    public void unknownTagStaysInItsInstance() {
+        FixMessage m = parse("35=D|453=2|448=A|452=11|5999=x|448=B|452=24|5999=y|55=IBM|");
+        // the group is not cut off: both instances, each with the stray tag, and no count problem
+        assertEquals("[GROUP_UNKNOWN_TAG, GROUP_UNKNOWN_TAG]", kinds(m).toString());
+        assertEquals("Unknown tag 5999 in instance 1 of NoPartyIDs; if it belongs to the group, add it to a custom dictionary",
+                m.problems().get(0).message());
+        FixNode.GroupNode g = group(m, 453);
+        assertEquals(2, g.instances().size());
+        assertEquals(3, g.instances().get(1).children().size());
+        assertSame(g, m.node(7).parentGroup());   // 5999=y, the last field of instance 2
+        assertNull(m.node(8).parentGroup());      // 55=IBM is back at the top level
+    }
+
+    @Test
+    public void messageFieldEndsTheGroup() {
+        // Text (58) is a field of NewOrderSingle itself, so it ends the group rather than joining the instance
+        FixMessage m = parse("35=D|453=1|448=A|58=hello|55=IBM|");
+        assertEquals("[]", kinds(m).toString());
+        assertNull(m.node(3).parentGroup());
+    }
+
+    @Test
+    public void unknownMessageTypeUsesTheGroupThatFits() {
+        // NoMDEntries starts with MDEntryType (269) in a snapshot and with MDUpdateAction (279) in an incremental refresh
+        FixMessage m = parse("35=U9|268=2|279=0|269=0|270=1.5|279=1|269=1|270=1.6|");
+        assertEquals("[]", kinds(m).toString());
+        assertEquals(2, group(m, 268).instances().size());
+        assertEquals(279, group(m, 268).def().delimiterTag());
+    }
+
+    @Test
+    public void userDefinedMessageTypeIsNotAnInvalidValue() {
+        assertEquals("[]", kinds(parse("35=U1|55=IBM|54=1|")).toString());
+        assertEquals("[ENUM_VALUE]", kinds(parse("35=ZZ|55=IBM|54=1|")).toString());
+    }
+
+    private static FixNode.GroupNode group(FixMessage m, int countTag) {
+        return (FixNode.GroupNode) m.nodes().stream()
+                .filter(n -> n instanceof FixNode.GroupNode && ((FixNode.GroupNode) n).count().field().tag() == countTag)
+                .findFirst().orElseThrow();
     }
 
     @Test

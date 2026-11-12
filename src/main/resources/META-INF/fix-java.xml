@@ -6,5 +6,8 @@
     <extensions defaultExtensionNs="com.intellij">
         <!-- Pasting a FIX message into Java asks whether to paste it as a Java string -->
         <editorActionHandler action="EditorPaste" implementationClass="com.dush.intellij.fixdecoder.java.FixPasteHandler" order="first"/>
+        <!-- IntelliJ's own hover and Ctrl+Q documentation shows the FIX field details instead of "No documentation found" -->
+        <lang.documentationProvider language="JAVA" order="first"
+                                    implementationClass="com.dush.intellij.fixdecoder.java.FixDocumentationProvider"/>
     </extensions>
 </idea-plugin>

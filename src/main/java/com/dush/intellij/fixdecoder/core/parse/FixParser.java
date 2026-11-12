@@ -65,9 +65,10 @@ public final class FixParser {
             RawField f = fields.get(pos);
             MemberDef member = topMember(f.tag());
             FixNode.FieldNode fn = fieldNode(f, member, null, 0);
-            GroupDef g = member != null ? member.group() : (msgDef == null ? dict.anyGroup(f.tag()) : null);
+            int nextTag = pos + 1 < fields.size() ? fields.get(pos + 1).tag() : -1;
+            GroupDef g = member != null ? member.group() : (msgDef == null ? dict.groupFor(f.tag(), nextTag) : null);
             if (g != null) {
-                FixNode.GroupNode gn = parseGroup(g, fn, pos + 1);
+                FixNode.GroupNode gn = parseGroup(g, fn, pos + 1, new ArrayList<>());
                 out.add(gn);
                 pos = gn.endPos;
             } else {
@@ -92,7 +93,8 @@ public final class FixParser {
         return fn;
     }
 
-    private FixNode.GroupNode parseGroup(GroupDef g, FixNode.FieldNode countNode, int pos) {
+    /** @param enclosing the groups this one is nested in, outermost first */
+    private FixNode.GroupNode parseGroup(GroupDef g, FixNode.FieldNode countNode, int pos, List<GroupDef> enclosing) {
         FixNode.GroupNode gn = new FixNode.GroupNode(countNode, g);
         int declared = gn.declaredCount();
         RawField countField = countNode.field();
@@ -103,11 +105,11 @@ public final class FixParser {
         while (pos < fields.size()) {
             RawField f = fields.get(pos);
             if (f.tag() == g.delimiterTag()) {
-                pos = parseInstance(g, gn, pos);
+                pos = parseInstance(g, gn, pos, enclosing);
             } else if (gn.instances().isEmpty() && g.contains(f.tag())) {
                 problems.add(new Problem(Problem.Kind.GROUP_MISSING_DELIMITER, f, f.start(), f.end(),
                         "Instance 1 of " + g.name() + " must start with " + describe(g.delimiter()) + ", not " + describe(f), -1));
-                pos = parseInstance(g, gn, pos);
+                pos = parseInstance(g, gn, pos, enclosing);
             } else {
                 break;
             }
@@ -117,38 +119,55 @@ public final class FixParser {
             problems.add(new Problem(Problem.Kind.GROUP_COUNT, countField, countField.start(), countField.end(),
                     describe(g.countField()) + " says " + declared + ", but " + actual + (actual == 1 ? " instance" : " instances")
                             + " found", actual));
-            if (actual < declared && pos < fields.size() && dict.field(fields.get(pos).tag()) == null) {
-                RawField u = fields.get(pos);
-                problems.add(new Problem(Problem.Kind.GROUP_UNKNOWN_TAG, u, u.start(), u.end(),
-                        "Unknown tag " + u.tag() + " ends " + g.name() + "; if it belongs to the group, add it to a custom dictionary", -1));
-            }
         }
         gn.endPos = pos;
         return gn;
     }
 
-    private int parseInstance(GroupDef g, FixNode.GroupNode gn, int pos) {
+    /**
+     * Reads one instance. It ends at the next delimiter field or at a field that belongs elsewhere: to the message,
+     * header or trailer, or to an enclosing group. A field that belongs nowhere (typically a venue tag that the dictionary
+     * doesn't list in this group) stays in the instance and is reported, so the rest of the group is not cut off.
+     */
+    private int parseInstance(GroupDef g, FixNode.GroupNode gn, int pos, List<GroupDef> enclosing) {
         FixNode.Instance inst = new FixNode.Instance(gn.instances().size() + 1);
         gn.add(inst);
+        String where = " instance " + inst.number() + " of " + g.name();
         int last = -1;
         boolean first = true;
+        boolean hasDelimiter = false;
         while (pos < fields.size()) {
             RawField f = fields.get(pos);
-            if (!first && f.tag() == g.delimiterTag()) break;
+            boolean isDelimiter = f.tag() == g.delimiterTag();
+            if (!first && isDelimiter && hasDelimiter) break;
             int idx = g.indexOf(f.tag());
-            if (idx < 0) break;
-            if (idx <= last) {
-                String where = " in instance " + inst.number() + " of " + g.name();
+            if (idx < 0) {
+                if (first || !belongsNowhere(f.tag(), enclosing)) break;
+                FieldDef d = dict.field(f.tag());
+                String msg = d == null
+                        ? "Unknown tag " + f.tag() + " in" + where + "; if it belongs to the group, add it to a custom dictionary"
+                        : describe(d) + " is not part of " + g.name() + " (in" + where + "); if it belongs to the group, add it in a custom dictionary";
+                problems.add(new Problem(Problem.Kind.GROUP_UNKNOWN_TAG, f, f.start(), f.end(), msg, -1));
+                inst.add(fieldNode(f, null, gn, inst.number()));
+                pos++;
+                continue;
+            }
+            // An instance that started without its delimiter takes the next delimiter in (already reported as missing).
+            boolean lateDelimiter = isDelimiter && !first && !hasDelimiter;
+            if (idx <= last && !lateDelimiter) {
                 String msg = idx == last
-                        ? describe(f) + " appears twice" + where
-                        : describe(f) + " is out of order" + where + ": it must come before " + describe(g.members().get(last).field());
+                        ? describe(f) + " appears twice in" + where
+                        : describe(f) + " is out of order in" + where + ": it must come before " + describe(g.members().get(last).field());
                 problems.add(new Problem(Problem.Kind.GROUP_FIELD_ORDER, f, f.start(), f.end(), msg, -1));
             }
+            hasDelimiter |= isDelimiter;
             last = Math.max(last, idx);
             MemberDef m = g.members().get(idx);
             FixNode.FieldNode fn = fieldNode(f, m, gn, inst.number());
             if (m.group() != null) {
-                FixNode.GroupNode inner = parseGroup(m.group(), fn, pos + 1);
+                List<GroupDef> chain = new ArrayList<>(enclosing);
+                chain.add(g);
+                FixNode.GroupNode inner = parseGroup(m.group(), fn, pos + 1, chain);
                 inst.add(inner);
                 pos = inner.endPos;
             } else {
@@ -158,6 +177,17 @@ public final class FixParser {
             first = false;
         }
         return pos;
+    }
+
+    /**
+     * True for a tag that is not a field of the message, header or trailer, nor of an enclosing group.
+     * For a message type the dictionary doesn't know, only tags missing from the dictionary count, since any known
+     * tag might be a field of that message.
+     */
+    private boolean belongsNowhere(int tag, List<GroupDef> enclosing) {
+        if (topMember(tag) != null) return false;
+        for (GroupDef outer : enclosing) if (outer.contains(tag)) return false;
+        return msgDef != null || dict.field(tag) == null;
     }
 
     private String describe(RawField f) {

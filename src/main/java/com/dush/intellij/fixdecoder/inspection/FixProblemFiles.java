@@ -70,7 +70,6 @@ public final class FixProblemFiles implements TextEditorHighlightingPassFactory,
     private static final class Pass extends TextEditorHighlightingPass {
         private final PsiFile file;
         private final VirtualFile virtualFile;
-        private boolean problems;
 
         Pass(PsiFile file, VirtualFile virtualFile, Editor editor) {
             super(file.getProject(), editor.getDocument(), false);
@@ -78,14 +77,14 @@ public final class FixProblemFiles implements TextEditorHighlightingPassFactory,
             this.virtualFile = virtualFile;
         }
 
+        /**
+         * Reports here, on the background thread: since 2026.1 the problem tracker refuses calls from the UI thread
+         * (reportProblemsFromExternalSource asserts a background thread), and older versions accept either.
+         */
         @Override
         public void doCollectInformation(@NotNull ProgressIndicator progress) {
-            problems = hasProblems(file);
-        }
-
-        @Override
-        public void doApplyInformationToEditor() {
             if (myProject.isDisposed() || !virtualFile.isValid()) return;
+            boolean problems = hasProblems(file);
             WolfTheProblemSolver wolf = WolfTheProblemSolver.getInstance(myProject);
             if (problems) {
                 REPORTED.add(virtualFile);
@@ -93,6 +92,11 @@ public final class FixProblemFiles implements TextEditorHighlightingPassFactory,
             } else if (REPORTED.remove(virtualFile)) {
                 wolf.clearProblemsFromExternalSource(virtualFile, SOURCE);
             }
+        }
+
+        @Override
+        public void doApplyInformationToEditor() {
+            // nothing to draw: the problem tracker marks the file name itself
         }
     }
 
