@@ -145,6 +145,19 @@ public class FixParserTest {
     }
 
     @Test
+    public void reparseWithAnotherDictionary() {
+        FixMessage m = parse("8=FIX.4.4|35=D|453=1|448=A|452=11|55=IBM|54=1|");
+        assertEquals(1, group(m, 453).instances().size());
+        // FIX 4.2 has no parties: same fields, no group, and BeginString no longer decides
+        FixMessage old = FixParser.reparse(m, SET.get(DictionarySet.FIX42));
+        assertEquals("FIX 4.2", old.dictionary().label());
+        assertSame(m.fields().get(3), old.fields().get(3));
+        assertEquals(m.fields().size(), old.nodes().size());
+        assertNull(old.node(3).def());
+        assertEquals("Buy", old.meaning(old.first(54)));
+    }
+
+    @Test
     public void messageFieldEndsTheGroup() {
         // Text (58) is a field of NewOrderSingle itself, so it ends the group rather than joining the instance
         FixMessage m = parse("35=D|453=1|448=A|58=hello|55=IBM|");

@@ -1,5 +1,6 @@
 package com.dush.intellij.fixdecoder.toolwindow;
 
+import com.dush.intellij.fixdecoder.core.dictionary.DictionarySet;
 import com.dush.intellij.fixdecoder.core.parse.FixMessage;
 import com.dush.intellij.fixdecoder.core.parse.FixNode;
 import com.dush.intellij.fixdecoder.core.parse.FixParser;
@@ -37,6 +38,7 @@ import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.TextRange;
@@ -105,6 +107,15 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
     private final TreeTableView table;
     private final List<Row> rows = new ArrayList<>();
 
+    /**
+     * The dictionary to decode with: {@link #AUTO} (from BeginString 8 and ApplVerID 1128, as everywhere else in the
+     * IDE) or one version, whatever the message says. It only changes this table, not hover or the inspections.
+     */
+    private final ComboBox<String> dictionary = new ComboBox<>();
+    static final String AUTO = "";
+    /** The message as found, decoded with the dictionary its BeginString asks for. */
+    private FixMessage source;
+    /** The message shown: {@link #source}, or the same fields decoded with the chosen dictionary. */
     private FixMessage message;
     /** The message shown, with its document ranges; null for pasted text. Kept to redraw when the view changes. */
     private FoundMessage shownFound;
@@ -180,8 +191,12 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         header.setBorder(JBUI.Borders.emptyLeft(8));
         top.add(header, BorderLayout.CENTER);
         search.getTextEditor().getEmptyText().setText("Search tag, name, value");
-        search.setPreferredSize(new java.awt.Dimension(JBUI.scale(220), search.getPreferredSize().height));
-        top.add(search, BorderLayout.EAST);
+        search.setPreferredSize(new java.awt.Dimension(JBUI.scale(200), search.getPreferredSize().height));
+        installDictionaryChoice();
+        JPanel right = new JPanel(new BorderLayout(JBUI.scale(6), 0));
+        right.add(dictionary, BorderLayout.WEST);
+        right.add(search, BorderLayout.CENTER);
+        top.add(right, BorderLayout.EAST);
         add(top, BorderLayout.NORTH);
         installSearch();
         add(ScrollPaneFactory.createScrollPane(table), BorderLayout.CENTER);
@@ -193,6 +208,65 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
                 followCaret(e.getEditor());
             }
         }, this);
+    }
+
+    private void installDictionaryChoice() {
+        dictionary.addItem(AUTO);
+        for (String v : DictionarySet.VERSIONS) dictionary.addItem(v);
+        // A plain Swing renderer: SimpleListCellRenderer.create(String, Function) is scheduled for removal.
+        dictionary.setRenderer(new javax.swing.DefaultListCellRenderer() {
+            @Override
+            public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list, Object value, int index,
+                                                                   boolean selected, boolean focus) {
+                String text = value == null || AUTO.equals(value) ? "Auto-detect" : FixDecoderConfigurable.versionLabel((String) value);
+                return super.getListCellRendererComponent(list, text, index, selected, focus);
+            }
+        });
+        dictionary.setToolTipText("<html>Dictionary used to decode the message in this table.<br>"
+                + "Auto-detect takes it from BeginString (8) and ApplVerID (1128).</html>");
+        dictionary.addActionListener(e -> {
+            if (source != null) build(source, shownFound);
+        });
+    }
+
+    /** The chosen version id, or null for auto-detect. */
+    @Nullable
+    private String chosenVersion() {
+        Object v = dictionary.getSelectedItem();
+        return v == null || AUTO.equals(v) ? null : (String) v;
+    }
+
+    /** {@code m} as it is, or decoded again with the chosen dictionary. */
+    private FixMessage decoded(FixMessage m) {
+        String version = chosenVersion();
+        return version == null ? m : FixParser.reparse(m, FixDictionaries.get(project).set().get(version));
+    }
+
+    /**
+     * Decodes the message shown again with the current dictionaries: a message in a document is found again, pasted
+     * text is parsed again.
+     */
+    void decodeAgain() {
+        if (document != null) {
+            refresh();
+        } else if (source != null) {
+            FixMessage m = FixParser.parse(source.text(), FixDictionaries.get(project).set(), FixDictionaries.get(project).defaultVersion());
+            if (m != null) build(m, null);
+        }
+    }
+
+    /** Ctrl+C: the values of the selected rows, one per line. */
+    @Nullable
+    String copySelectedValues() {
+        List<String> values = new ArrayList<>();
+        for (int row : table.getSelectedRows()) {
+            Row r = rowAt(row);
+            if (r != null && !r.instance) values.add(r.value);
+        }
+        if (values.isEmpty()) return null;
+        String text = String.join("\n", values);
+        CopyPasteManager.getInstance().setContents(new StringSelection(text));
+        return text;
     }
 
     private void installSearch() {
@@ -390,6 +464,14 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
             int row = table.getSelectedRow();
             if (row >= 0) navigate(rowAt(row), COL_VALUE, true);
         }, KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), JComponent.WHEN_FOCUSED);
+        // Ctrl+C (the Copy shortcut of the keymap) copies the Value of the selected rows; an IDE shortcut, so that the
+        // table's own copy of whole rows doesn't get there first
+        new com.intellij.openapi.project.DumbAwareAction() {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                copySelectedValues();
+            }
+        }.registerCustomShortcutSet(CommonShortcuts.getCopy(), table, this);
     }
 
     // --- showing a message ---
@@ -456,12 +538,13 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
             if (r.valueMarker != null) r.valueMarker.dispose();
         }
         rows.clear();
-        message = m;
+        source = m;
+        message = decoded(m);
         shownFound = found;
         stale = false;
         DefaultMutableTreeNode root = new DefaultMutableTreeNode();
-        if (isFlat()) addFlat(root, m, found);
-        else addNodes(root, m.nodes(), found);
+        if (isFlat()) addFlat(root, message, found);
+        else addNodes(root, message.nodes(), found);
         table.setModel(model(root));
         // a new model shows its root again; the root is only a holder for the rows
         table.setRootVisible(false);
@@ -523,7 +606,7 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
 
     void setFlat(boolean flat) {
         PropertiesComponent.getInstance().setValue(FLAT_KEY, flat, false);
-        if (message != null) build(message, shownFound);
+        if (source != null) build(source, shownFound);
     }
 
     private DefaultMutableTreeNode fieldNode(FixNode.FieldNode n, @Nullable FoundMessage found, @Nullable String groupMeaning) {
@@ -565,6 +648,7 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         }
         if (stale) sb.append(" · changed, no longer a FIX message");
         header.setText(sb.toString());
+        header.setToolTipText(sb.toString());   // the header is cut off when the tool window is narrow
         header.setForeground(stale ? JBColor.RED : null);
     }
 
@@ -764,6 +848,11 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
 
     List<Row> rows() {
         return rows;
+    }
+
+    /** {@link #AUTO} or a version id of {@link DictionarySet#VERSIONS}. */
+    void setDictionary(String version) {
+        dictionary.setSelectedItem(version);
     }
 
     void setSearchText(String text) {

@@ -45,6 +45,15 @@ public final class FixDecoderToolWindow implements ToolWindowFactory, DumbAware 
         if (panel != null) panel.askForMessage();
     }
 
+    /** Decodes the message shown again, after the dictionaries or the default version changed in settings. */
+    public static void dictionariesChanged(@NotNull Project project) {
+        ToolWindow tw = ToolWindowManager.getInstance(project).getToolWindow(ID);
+        // not getContentManager(): that would create the panel of a tool window that was never opened
+        if (tw == null || tw.getContentManagerIfCreated() == null) return;
+        FixDecoderPanel panel = panel(tw);
+        if (panel != null) panel.decodeAgain();
+    }
+
     private static FixDecoderPanel open(Project project) {
         ToolWindow tw = ToolWindowManager.getInstance(project).getToolWindow(ID);
         if (tw == null) return null;
