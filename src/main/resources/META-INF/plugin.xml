@@ -32,6 +32,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>1.0.2-beta</b></p>
+        <ul>
+            <li>Decoder table: Ctrl+C copies the Value of the selected rows</li>
+            <li>Decoder table: a drop-down to decode the message with FIX 4.2, FIX 4.4 or FIXT 1.1 / FIX 5.0 SP2,
+                whatever its BeginString says; Auto-detect is the default</li>
+            <li>Applying the FIX Decoder settings decodes the message in the table again</li>
+        </ul>
         <p><b>1.0.1-beta</b></p>
         <ul>
             <li>Search in the decoder table (Ctrl+F): highlights matching tags, names, values and meanings; Enter and the arrow keys jump between matches</li>

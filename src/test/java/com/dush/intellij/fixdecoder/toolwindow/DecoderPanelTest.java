@@ -3,10 +3,13 @@ package com.dush.intellij.fixdecoder.toolwindow;
 import com.dush.intellij.fixdecoder.FixTestCase;
 import com.dush.intellij.fixdecoder.extract.FoundMessage;
 import com.dush.intellij.fixdecoder.hover.FieldInfo;
+import com.dush.intellij.fixdecoder.core.dictionary.DictionarySet;
 import com.intellij.openapi.command.WriteCommandAction;
+import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.util.Disposer;
 
+import java.awt.datatransfer.DataFlavor;
 import java.util.stream.Collectors;
 
 public class DecoderPanelTest extends FixTestCase {
@@ -93,6 +96,46 @@ public class DecoderPanelTest extends FixTestCase {
             panel.setFlat(false);
             panel.setSearchText("");
         }
+    }
+
+    public void testCopyValue() throws Exception {
+        java(ORDER);
+        FixDecoderPanel panel = panel();
+        panel.show(myFixture.getEditor().getDocument(), only());
+        assertNull("nothing selected, nothing copied", panel.copySelectedValues());
+        try {
+            panel.setSearchText("desk");   // selects the DESK7 row
+            assertEquals("DESK7", panel.copySelectedValues());
+            assertEquals("DESK7", CopyPasteManager.getInstance().getContents(DataFlavor.stringFlavor));
+        } finally {
+            panel.setSearchText("");
+        }
+    }
+
+    public void testDictionaryChoice() {
+        java(ORDER);
+        FixDecoderPanel panel = panel();
+        panel.show(myFixture.getEditor().getDocument(), only());
+        assertTrue(panel.headerText(), panel.headerText().contains("· FIX 4.4 ·"));
+
+        // FIX 4.2 has no parties: the same fields, decoded again at once, without the group
+        panel.setDictionary(DictionarySet.FIX42);
+        assertTrue(panel.headerText(), panel.headerText().contains("· FIX 4.2 ·"));
+        assertEquals("8,35,11,453,448,452,448,452,55,54", panel.rows().stream().map(r -> r.tag).collect(Collectors.joining(",")));
+        assertEquals("(unknown)", panel.rows().get(3).name);
+        assertEquals("Buy", panel.rows().get(9).meaning);
+        // still linked to the editor
+        panel.click(panel.rows().get(6), FixDecoderPanel.COL_VALUE, false);
+        assertEquals("DESK7", myFixture.getEditor().getSelectionModel().getSelectedText());
+
+        // the choice stays when the message is decoded again
+        panel.refreshNow();
+        assertTrue(panel.headerText(), panel.headerText().contains("· FIX 4.2 ·"));
+
+        panel.setDictionary(FixDecoderPanel.AUTO);
+        assertTrue(panel.headerText(), panel.headerText().contains("· FIX 4.4 ·"));
+        assertEquals("8,35,11,453,[1],448,452,[2],448,452,55,54",
+                panel.rows().stream().map(r -> r.tag).collect(Collectors.joining(",")));
     }
 
     public void testFlatList() {

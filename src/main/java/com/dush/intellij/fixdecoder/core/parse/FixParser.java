@@ -42,17 +42,33 @@ public final class FixParser {
         List<RawField> fields = span.fields();
         String begin = null;
         String applVerId = null;
-        String msgType = null;
         for (RawField f : fields) {
             if (f.tag() == 8 && begin == null) begin = f.value();
             else if (f.tag() == 1128 && applVerId == null) applVerId = f.value();
-            else if (f.tag() == 35 && msgType == null) msgType = f.value();
         }
-        Dictionary dict = set.get(DictionarySet.versionFor(begin, applVerId, defaultVersion));
+        return parse(text, span.delimiter(), fields, set.get(DictionarySet.versionFor(begin, applVerId, defaultVersion)));
+    }
+
+    /**
+     * Decodes a message again with another dictionary, whatever its BeginString says. The fields are the same
+     * objects, so offsets and field indexes still fit the original message.
+     */
+    public static FixMessage reparse(FixMessage m, Dictionary dict) {
+        return parse(m.text(), m.delimiter(), m.fields(), dict);
+    }
+
+    private static FixMessage parse(String text, String delimiter, List<RawField> fields, Dictionary dict) {
+        String msgType = null;
+        for (RawField f : fields) {
+            if (f.tag() == 35) {
+                msgType = f.value();
+                break;
+            }
+        }
         MessageDef msgDef = msgType == null ? null : dict.message(msgType);
         FixParser p = new FixParser(fields, dict, msgDef);
         List<FixNode> nodes = p.parseTop();
-        FixMessage m = new FixMessage(text, span.delimiter(), new ArrayList<>(fields), dict, msgDef, nodes, p.byIndex);
+        FixMessage m = new FixMessage(text, delimiter, new ArrayList<>(fields), dict, msgDef, nodes, p.byIndex);
         for (Problem problem : p.problems) m.addProblem(problem);
         FixValidator.validate(m);
         return m;

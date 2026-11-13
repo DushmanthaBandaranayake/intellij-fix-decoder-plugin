@@ -96,7 +96,7 @@ public final class FixDecoderConfigurable implements Configurable {
         return panel;
     }
 
-    static String versionLabel(String v) {
+    public static String versionLabel(String v) {
         switch (v) {
             case DictionarySet.FIX42:
                 return "FIX 4.2";
@@ -152,6 +152,7 @@ public final class FixDecoderConfigurable implements Configurable {
         s.pastePopup = pastePopup.isSelected();
         FixDictionaries.get(project).reload();
         DaemonCodeAnalyzer.getInstance(project).restart();
+        com.dush.intellij.fixdecoder.toolwindow.FixDecoderToolWindow.dictionariesChanged(project);
     }
 
     /** Loads every custom dictionary once, so that a bad file is reported in the dialog. */
