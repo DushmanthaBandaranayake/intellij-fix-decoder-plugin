@@ -2,6 +2,7 @@ package com.dush.intellij.fixdecoder;
 
 import com.dush.intellij.fixdecoder.extract.FixMessages;
 import com.dush.intellij.fixdecoder.extract.FoundMessage;
+import com.dush.intellij.fixdecoder.settings.FixActiveDictionary;
 import com.dush.intellij.fixdecoder.settings.FixDecoderSettings;
 import com.dush.intellij.fixdecoder.settings.FixDictionaries;
 import com.intellij.openapi.util.TextRange;
@@ -26,6 +27,7 @@ public abstract class FixTestCase extends LightJavaCodeInsightFixtureTestCase {
         super.setUp();
         // The light project is shared between tests: start each one from the default settings.
         FixDecoderSettings.get(getProject()).loadState(new FixDecoderSettings.State());
+        FixActiveDictionary.get(getProject()).set(FixActiveDictionary.AUTO);
         FixDictionaries.get(getProject()).reload();
         // The descriptor has no JDK. Constant evaluation needs String to resolve, so declare the few classes used.
         myFixture.addClass("package java.lang; public class Object { }");

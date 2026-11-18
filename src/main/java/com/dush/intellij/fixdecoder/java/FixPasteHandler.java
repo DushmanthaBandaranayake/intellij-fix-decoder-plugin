@@ -1,5 +1,6 @@
 package com.dush.intellij.fixdecoder.java;
 
+import com.dush.intellij.fixdecoder.FixDecoderIcons;
 import com.dush.intellij.fixdecoder.core.parse.FixMessage;
 import com.dush.intellij.fixdecoder.core.parse.FixParser;
 import com.dush.intellij.fixdecoder.core.parse.FixRewriter;
@@ -31,6 +32,7 @@ import com.intellij.psi.tree.IElementType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.Icon;
 import java.awt.datatransfer.DataFlavor;
 import java.util.Arrays;
 import java.util.List;
@@ -82,6 +84,11 @@ public final class FixPasteHandler extends EditorActionHandler {
             @Override
             public void canceled() {
                 if (!chosen) pasteAsIs(project, editor);
+            }
+
+            @Override
+            public Icon getIconFor(String value) {
+                return FixDecoderIcons.DECODER;
             }
         });
         popup.showInBestPositionFor(editor);

@@ -145,16 +145,18 @@ public class FixParserTest {
     }
 
     @Test
-    public void reparseWithAnotherDictionary() {
-        FixMessage m = parse("8=FIX.4.4|35=D|453=1|448=A|452=11|55=IBM|54=1|");
-        assertEquals(1, group(m, 453).instances().size());
-        // FIX 4.2 has no parties: same fields, no group, and BeginString no longer decides
-        FixMessage old = FixParser.reparse(m, SET.get(DictionarySet.FIX42));
+    public void forcedVersionIgnoresBeginString() {
+        String text = "8=FIX.4.4|35=D|453=1|448=A|452=11|55=IBM|54=1|";
+        assertEquals(1, group(parse(text), 453).instances().size());
+        // FIX 4.2 has no parties: no group, and BeginString no longer decides
+        FixMessage old = FixParser.parse(text, SET.forcing(DictionarySet.FIX42), DictionarySet.FIX44);
         assertEquals("FIX 4.2", old.dictionary().label());
-        assertSame(m.fields().get(3), old.fields().get(3));
-        assertEquals(m.fields().size(), old.nodes().size());
+        assertEquals(old.fields().size(), old.nodes().size());
         assertNull(old.node(3).def());
         assertEquals("Buy", old.meaning(old.first(54)));
+        // a custom dictionary keeps the forced version
+        assertEquals("FIX 4.2", FixParser.parse(text, SET.forcing(DictionarySet.FIX42).forcing(DictionarySet.FIX42), null).dictionary().label());
+        assertEquals("FIX 4.4", FixParser.parse(text, SET.forcing(null), null).dictionary().label());
     }
 
     @Test

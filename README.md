@@ -13,7 +13,7 @@ An IntelliJ plugin for FIX protocol messages written in Java code (string litera
   - Clicking a value selects it in the editor; clicking the tag selects the `tag=` part. The focus stays in the table, so you can use the arrow keys.
   - Double-click or Enter moves the focus to the editor.
   - Moving the caret in the editor selects the matching row.
-  - The table follows edits to the message. The toolbar can refresh it, copy the message as readable text, decode a message you paste, switch to a flat list (every field in message order, repeating groups not nested), and open the FIX Decoder settings. The search box (Ctrl+F, or your Find shortcut) highlights the fields whose tag, name, value or meaning match, without hiding any rows. Enter or Down jumps to the next match, Shift+Enter or Up to the previous one (F3 and Shift+F3 work from the table too), and Esc clears it. Ctrl+C copies the Value of the selected row. The dictionary drop-down next to the search box decodes the message with FIX 4.2, FIX 4.4 or FIXT 1.1 / FIX 5.0 SP2 whatever its BeginString says (Auto-detect is the default); it changes only the table, not hover or the inspections.
+  - The table follows edits to the message. The toolbar can refresh it, copy the message as readable text, decode a message you paste, switch to a flat list (every field in message order, repeating groups not nested), and open the FIX Decoder settings. The search box (Ctrl+F, or your Find shortcut) highlights the fields whose tag, name, value or meaning match, without hiding any rows. Enter or Down jumps to the next match, Shift+Enter or Up to the previous one (F3 and Shift+F3 work from the table too), and Esc clears it. Ctrl+C copies the Value of the selected row. The Jump to Source on Click toggle in the toolbar (on by default) decides whether a single click on a row selects its value in the editor; double-click or Enter always jumps there. The dictionary drop-down next to the search box chooses the dictionary in use for the whole project, in the editor (hover, problems, hints) and in the table alike. **Auto**, the default, takes the version from each message's BeginString (FIX 4.4 when it has none) and lays every custom dictionary over it. A standard version (FIX 4.2, FIX 4.4, FIXT 1.1 / FIX 5.0 SP2) is used for every message, whatever its BeginString says, without custom dictionaries. A custom dictionary added in the settings is listed by file name and is used on its own, over the standard version it is for, so two venue dictionaries that conflict don't have to be merged. The choice is kept per user, not in `.idea/fixDecoder.xml`.
 - **Inspections** (Settings | Editor | Inspections | FIX Decoder): every problem is an error, a red underline on the whole field (`tag=value`) it is about. You can lower the level of any of them in the inspection settings.
   - *Repeating group is broken*: the count doesn't match the instances found, an instance doesn't start with the group's first field, a field is out of order or repeated, or an unknown tag ends a group early. Quick fix: *Set count to N*.
   - *BodyLength or CheckSum is wrong*. Quick fix: *Recompute BodyLength and CheckSum*.
@@ -40,11 +40,10 @@ In Java, the literal parts of a concatenation are decoded with the literal's own
 
 ## Dictionaries
 
-The plugin bundles the QuickFIX/J dictionaries for FIX 4.2, FIX 4.4, FIX 5.0 SP2 and FIXT 1.1. The version is chosen from BeginString (8), and from ApplVerID (1128) for FIXT.
+The plugin bundles the QuickFIX/J dictionaries for FIX 4.2, FIX 4.4, FIX 5.0 SP2 and FIXT 1.1. The version is chosen from BeginString (8), and from ApplVerID (1128) for FIXT; a message without BeginString, such as a fragment, is decoded as FIX 4.4. The dictionary drop-down in the decoder can choose one dictionary for every message instead.
 
 Under **Settings | Tools | FIX Decoder** you can:
 - add custom QuickFIX/J XML dictionaries. A custom file may contain only the fields and messages it adds, and may refer to fields and components of the standard dictionary. It applies to the version in its `<fix>` element, or to every version when that element has none.
-- choose the version for messages without BeginString.
 - turn repeating-group validation, BodyLength/CheckSum fixing, inline hints and the paste popup on or off.
 
 ## Build

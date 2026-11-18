@@ -1,5 +1,6 @@
 package com.dush.intellij.fixdecoder.inspection;
 
+import com.dush.intellij.fixdecoder.FixDecoderIcons;
 import com.dush.intellij.fixdecoder.core.parse.FixRewriter;
 import com.dush.intellij.fixdecoder.core.parse.RawField;
 import com.dush.intellij.fixdecoder.edit.FixEdits;
@@ -8,15 +9,18 @@ import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Iconable;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import org.jetbrains.annotations.NotNull;
 
+import javax.swing.Icon;
+
 import java.util.Collections;
 
 /** Sets a group's NumInGroup field to the number of instances actually present. */
-final class SetGroupCountFix implements LocalQuickFix {
+final class SetGroupCountFix implements LocalQuickFix, Iconable {
     private final int tag;
     private final int count;
 
@@ -33,6 +37,12 @@ final class SetGroupCountFix implements LocalQuickFix {
     @Override
     public @NotNull String getFamilyName() {
         return "Set repeating group count";
+    }
+
+    /** The plugin icon, so that the plugin's entries stand out in the Alt+Enter list. */
+    @Override
+    public Icon getIcon(@IconFlags int flags) {
+        return FixDecoderIcons.DECODER;
     }
 
     @Override
