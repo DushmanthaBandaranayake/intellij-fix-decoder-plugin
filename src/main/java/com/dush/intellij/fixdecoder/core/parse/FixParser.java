@@ -46,15 +46,7 @@ public final class FixParser {
             if (f.tag() == 8 && begin == null) begin = f.value();
             else if (f.tag() == 1128 && applVerId == null) applVerId = f.value();
         }
-        return parse(text, span.delimiter(), fields, set.get(DictionarySet.versionFor(begin, applVerId, defaultVersion)));
-    }
-
-    /**
-     * Decodes a message again with another dictionary, whatever its BeginString says. The fields are the same
-     * objects, so offsets and field indexes still fit the original message.
-     */
-    public static FixMessage reparse(FixMessage m, Dictionary dict) {
-        return parse(m.text(), m.delimiter(), m.fields(), dict);
+        return parse(text, span.delimiter(), fields, set.forMessage(begin, applVerId, defaultVersion));
     }
 
     private static FixMessage parse(String text, String delimiter, List<RawField> fields, Dictionary dict) {

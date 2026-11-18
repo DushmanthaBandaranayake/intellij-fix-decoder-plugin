@@ -9,16 +9,13 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.CollectionListModel;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.components.JBCheckBox;
-import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBList;
 import com.intellij.util.ui.FormBuilder;
-import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nullable;
 
@@ -28,14 +25,12 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 
 /** Settings > Tools > FIX Decoder. */
 public final class FixDecoderConfigurable implements Configurable {
     private final Project project;
 
     private CollectionListModel<String> dictionaries;
-    private ComboBox<String> version;
     private JBCheckBox groupValidation;
     private JBCheckBox lengthChecksum;
     private JBCheckBox inlineHints;
@@ -61,30 +56,13 @@ public final class FixDecoderConfigurable implements Configurable {
                 .setPreferredSize(new java.awt.Dimension(400, 100))
                 .createPanel();
 
-        version = new ComboBox<>(DictionarySet.VERSIONS.toArray(new String[0]));
-        // A plain Swing renderer: SimpleListCellRenderer.create(String, Function) is scheduled for removal.
-        version.setRenderer(new javax.swing.DefaultListCellRenderer() {
-            @Override
-            public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list, Object value, int index,
-                                                                   boolean selected, boolean focus) {
-                return super.getListCellRendererComponent(list, value == null ? "" : versionLabel((String) value), index, selected, focus);
-            }
-        });
-
         groupValidation = new JBCheckBox("Check repeating groups");
         lengthChecksum = new JBCheckBox("Check and fix BodyLength (9) and CheckSum (10)");
         inlineHints = new JBCheckBox("Show value meanings as inline hints (54=1 Buy)");
         pastePopup = new JBCheckBox("Ask how to paste a FIX message into Java code");
 
-        JBLabel dictionaryHelp = new JBLabel("QuickFIX/J XML files, laid over the bundled FIX 4.2, 4.4 and 5.0 SP2 dictionaries. "
-                + "A file applies to the version in its <fix> element, or to all versions when it has none.");
-        dictionaryHelp.setComponentStyle(UIUtil.ComponentStyle.SMALL);
-        dictionaryHelp.setForeground(UIUtil.getContextHelpForeground());
-
         JPanel panel = FormBuilder.createFormBuilder()
                 .addLabeledComponent("Custom dictionaries:", dictionaryPanel, true)
-                .addComponentToRightColumn(dictionaryHelp)
-                .addLabeledComponent("Version for messages without BeginString (8):", version)
                 .addSeparator()
                 .addComponent(groupValidation)
                 .addComponent(lengthChecksum)
@@ -132,7 +110,6 @@ public final class FixDecoderConfigurable implements Configurable {
     public boolean isModified() {
         FixDecoderSettings.State s = state();
         return !dictionaries.getItems().equals(s.customDictionaries)
-                || !Objects.equals(version.getSelectedItem(), s.defaultVersion)
                 || groupValidation.isSelected() != s.groupValidation
                 || lengthChecksum.isSelected() != s.lengthChecksumFix
                 || inlineHints.isSelected() != s.inlineHints
@@ -145,7 +122,6 @@ public final class FixDecoderConfigurable implements Configurable {
         check(project, paths);
         FixDecoderSettings.State s = state();
         s.customDictionaries = paths;
-        s.defaultVersion = (String) version.getSelectedItem();
         s.groupValidation = groupValidation.isSelected();
         s.lengthChecksumFix = lengthChecksum.isSelected();
         s.inlineHints = inlineHints.isSelected();
@@ -174,7 +150,6 @@ public final class FixDecoderConfigurable implements Configurable {
     public void reset() {
         FixDecoderSettings.State s = state();
         dictionaries.replaceAll(s.customDictionaries);
-        version.setSelectedItem(s.defaultVersion);
         groupValidation.setSelected(s.groupValidation);
         lengthChecksum.setSelected(s.lengthChecksumFix);
         inlineHints.setSelected(s.inlineHints);
@@ -184,7 +159,6 @@ public final class FixDecoderConfigurable implements Configurable {
     @Override
     public void disposeUIResources() {
         dictionaries = null;
-        version = null;
         groupValidation = null;
         lengthChecksum = null;
         inlineHints = null;

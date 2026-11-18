@@ -58,10 +58,17 @@ public final class DictionarySet {
     private final Map<String, Recipe> recipes;
     private final Map<String, Dictionary> byVersion;
     private final Set<Integer> knownTags = new HashSet<>();
+    /** The version used for every message, or null to take it from the message. */
+    private final String forced;
 
     private DictionarySet(Map<String, Recipe> recipes, Map<String, Dictionary> byVersion) {
+        this(recipes, byVersion, null);
+    }
+
+    private DictionarySet(Map<String, Recipe> recipes, Map<String, Dictionary> byVersion, String forced) {
         this.recipes = recipes;
         this.byVersion = byVersion;
+        this.forced = forced;
         for (Dictionary d : byVersion.values()) {
             for (FieldDef f : d.fields()) knownTags.add(f.number());
         }
@@ -119,11 +126,24 @@ public final class DictionarySet {
             r.put(e.getKey(), next);
             map.put(e.getKey(), next.build());
         }
-        return new DictionarySet(r, map);
+        return new DictionarySet(r, map, forced);
+    }
+
+    /** A copy that uses one version for every message, whatever its BeginString says; null lets the message decide. */
+    public DictionarySet forcing(String version) {
+        return new DictionarySet(recipes, byVersion, version);
+    }
+
+    /**
+     * The dictionary for a message: the forced version if there is one, otherwise from its BeginString (8) and, for
+     * FIXT, its ApplVerID (1128), with {@code defaultVersion} for unknown or missing values.
+     */
+    public Dictionary forMessage(String beginString, String applVerId, String defaultVersion) {
+        return get(forced != null ? forced : versionFor(beginString, applVerId, defaultVersion));
     }
 
     /** The version a custom file is for, or null for all. */
-    private static String targetVersion(byte[] xml) {
+    public static String targetVersion(byte[] xml) {
         String head = new String(xml, 0, Math.min(xml.length, 4096), java.nio.charset.StandardCharsets.ISO_8859_1);
         int i = head.indexOf("<fix");
         if (i < 0) return null;

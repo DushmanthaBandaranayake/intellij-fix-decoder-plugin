@@ -1,5 +1,6 @@
 package com.dush.intellij.fixdecoder.intention;
 
+import com.dush.intellij.fixdecoder.FixDecoderIcons;
 import com.dush.intellij.fixdecoder.core.parse.FixRewriter;
 import com.dush.intellij.fixdecoder.edit.FixEdits;
 import com.dush.intellij.fixdecoder.extract.FixMessages;
@@ -7,15 +8,17 @@ import com.dush.intellij.fixdecoder.extract.FoundMessage;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Iconable;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.Icon;
 import java.util.List;
 
 /** An intention that rewrites the FIX message at the caret. Available only when the edits can be written back. */
-abstract class FixIntentionBase implements IntentionAction {
+abstract class FixIntentionBase implements IntentionAction, Iconable {
 
     /** The edits for the message, or an empty list when the intention does not apply to it. */
     protected abstract List<FixRewriter.Edit> edits(@NotNull Project project, @NotNull FoundMessage message);
@@ -23,6 +26,12 @@ abstract class FixIntentionBase implements IntentionAction {
     @Override
     public @NotNull String getFamilyName() {
         return getText();
+    }
+
+    /** The plugin icon, so that the plugin's entries stand out in the Alt+Enter list. */
+    @Override
+    public Icon getIcon(@IconFlags int flags) {
+        return FixDecoderIcons.DECODER;
     }
 
     @Override

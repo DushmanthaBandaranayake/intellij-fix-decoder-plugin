@@ -1,6 +1,5 @@
 package com.dush.intellij.fixdecoder.toolwindow;
 
-import com.dush.intellij.fixdecoder.core.dictionary.DictionarySet;
 import com.dush.intellij.fixdecoder.core.parse.FixMessage;
 import com.dush.intellij.fixdecoder.core.parse.FixNode;
 import com.dush.intellij.fixdecoder.core.parse.FixParser;
@@ -10,7 +9,9 @@ import com.dush.intellij.fixdecoder.core.parse.Problem;
 import com.dush.intellij.fixdecoder.core.parse.RawField;
 import com.dush.intellij.fixdecoder.extract.FixMessages;
 import com.dush.intellij.fixdecoder.extract.FoundMessage;
+import com.dush.intellij.fixdecoder.settings.FixActiveDictionary;
 import com.dush.intellij.fixdecoder.settings.FixDecoderConfigurable;
+import com.dush.intellij.fixdecoder.settings.FixDecoderSettings;
 import com.dush.intellij.fixdecoder.settings.FixDictionaries;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.util.PropertiesComponent;
@@ -108,14 +109,11 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
     private final List<Row> rows = new ArrayList<>();
 
     /**
-     * The dictionary to decode with: {@link #AUTO} (from BeginString 8 and ApplVerID 1128, as everywhere else in the
-     * IDE) or one version, whatever the message says. It only changes this table, not hover or the inspections.
+     * The project's dictionary in use ({@link FixActiveDictionary}); the items are its keys. Choosing one changes it
+     * for the editor too, not only for this table.
      */
     private final ComboBox<String> dictionary = new ComboBox<>();
-    static final String AUTO = "";
-    /** The message as found, decoded with the dictionary its BeginString asks for. */
-    private FixMessage source;
-    /** The message shown: {@link #source}, or the same fields decoded with the chosen dictionary. */
+    private boolean loadingChoices;
     private FixMessage message;
     /** The message shown, with its document ranges; null for pasted text. Kept to redraw when the view changes. */
     private FoundMessage shownFound;
@@ -211,46 +209,52 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
     }
 
     private void installDictionaryChoice() {
-        dictionary.addItem(AUTO);
-        for (String v : DictionarySet.VERSIONS) dictionary.addItem(v);
+        loadDictionaryChoices();
         // A plain Swing renderer: SimpleListCellRenderer.create(String, Function) is scheduled for removal.
         dictionary.setRenderer(new javax.swing.DefaultListCellRenderer() {
             @Override
             public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list, Object value, int index,
                                                                    boolean selected, boolean focus) {
-                String text = value == null || AUTO.equals(value) ? "Auto-detect" : FixDecoderConfigurable.versionLabel((String) value);
-                return super.getListCellRendererComponent(list, text, index, selected, focus);
+                return super.getListCellRendererComponent(list, FixActiveDictionary.label((String) value), index, selected, focus);
             }
         });
-        dictionary.setToolTipText("<html>Dictionary used to decode the message in this table.<br>"
-                + "Auto-detect takes it from BeginString (8) and ApplVerID (1128).</html>");
+        dictionary.setToolTipText("<html>Dictionary in use for this project's FIX messages, in the editor and in this table.<br>"
+                + "Auto takes the version from each message's BeginString (8), FIX 4.4 when it has none,<br>"
+                + "and uses every custom dictionary.<br>"
+                + "A version uses that standard dictionary for every message.<br>"
+                + "A custom dictionary uses the standard one plus that file alone.</html>");
         dictionary.addActionListener(e -> {
-            if (source != null) build(source, shownFound);
+            if (loadingChoices) return;
+            FixActiveDictionary.choose(project, (String) dictionary.getSelectedItem());
+            decodeAgain();
         });
-    }
-
-    /** The chosen version id, or null for auto-detect. */
-    @Nullable
-    private String chosenVersion() {
-        Object v = dictionary.getSelectedItem();
-        return v == null || AUTO.equals(v) ? null : (String) v;
-    }
-
-    /** {@code m} as it is, or decoded again with the chosen dictionary. */
-    private FixMessage decoded(FixMessage m) {
-        String version = chosenVersion();
-        return version == null ? m : FixParser.reparse(m, FixDictionaries.get(project).set().get(version));
     }
 
     /**
-     * Decodes the message shown again with the current dictionaries: a message in a document is found again, pasted
-     * text is parsed again.
+     * Fills the drop-down: auto, the versions, then the custom dictionaries of the settings, and selects the choice
+     * in effect. The paths come from the settings, so nothing is read from disk here.
+     */
+    private void loadDictionaryChoices() {
+        loadingChoices = true;
+        try {
+            dictionary.removeAllItems();
+            for (String k : FixActiveDictionary.choices(FixDecoderSettings.of(project).customDictionaries)) dictionary.addItem(k);
+            dictionary.setSelectedItem(FixActiveDictionary.of(project));
+        } finally {
+            loadingChoices = false;
+        }
+    }
+
+    /**
+     * Decodes the message shown again after the dictionaries, or the choice between them, changed: a message in a
+     * document is found again, pasted text is parsed again.
      */
     void decodeAgain() {
+        loadDictionaryChoices();
         if (document != null) {
             refresh();
-        } else if (source != null) {
-            FixMessage m = FixParser.parse(source.text(), FixDictionaries.get(project).set(), FixDictionaries.get(project).defaultVersion());
+        } else if (message != null) {
+            FixMessage m = FixParser.parse(message.text(), FixDictionaries.get(project).set(), FixDictionaries.get(project).defaultVersion());
             if (m != null) build(m, null);
         }
     }
@@ -407,6 +411,7 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         group.add(new PanelAction("Paste Message", "Decode a message from text you paste", AllIcons.Actions.MenuPaste, this::askForMessage));
         group.addSeparator();
         group.add(new FlatToggle());
+        group.add(new JumpToSourceToggle());
         group.add(new PanelAction("Settings", "Open Settings | Tools | FIX Decoder", AllIcons.General.Settings,
                 () -> ShowSettingsUtil.getInstance().showSettingsDialog(project, FixDecoderConfigurable.class)));
         ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar("FixDecoderToolbar", group, true);
@@ -435,6 +440,28 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         }
     }
 
+    /**
+     * Whether a single click on a row selects its value in the editor. On by default; double click and Enter jump to
+     * the source either way, as in the Project view. UpdateInBackground for the same reason as {@link FlatToggle}.
+     */
+    @SuppressWarnings("removal")
+    private static final class JumpToSourceToggle extends ToggleAction implements DumbAware, com.intellij.openapi.actionSystem.UpdateInBackground {
+        JumpToSourceToggle() {
+            super("Jump to Source on Click", "Select the value in the editor when a row is clicked; double-click or Enter always jumps",
+                    AllIcons.General.AutoscrollToSource);
+        }
+
+        @Override
+        public boolean isSelected(@NotNull AnActionEvent e) {
+            return isJumpOnClick();
+        }
+
+        @Override
+        public void setSelected(@NotNull AnActionEvent e, boolean state) {
+            setJumpOnClick(state);
+        }
+    }
+
     private static final class PanelAction extends AnAction implements DumbAware {
         private final Runnable run;
 
@@ -457,7 +484,7 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
                 int row = table.rowAtPoint(e.getPoint());
                 int col = table.columnAtPoint(e.getPoint());
                 if (row < 0) return;
-                navigate(rowAt(row), col, e.getClickCount() >= 2);
+                clicked(rowAt(row), col, e.getClickCount());
             }
         });
         table.registerKeyboardAction(e -> {
@@ -538,8 +565,7 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
             if (r.valueMarker != null) r.valueMarker.dispose();
         }
         rows.clear();
-        source = m;
-        message = decoded(m);
+        message = m;
         shownFound = found;
         stale = false;
         DefaultMutableTreeNode root = new DefaultMutableTreeNode();
@@ -599,6 +625,16 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
     // --- flat or grouped view, remembered for the whole IDE ---
 
     private static final String FLAT_KEY = "com.dush.fixdecoder.flatView";
+    private static final String JUMP_KEY = "com.dush.fixdecoder.jumpToSourceOnClick";
+
+    /** Jump to Source on Click, remembered for the whole IDE; on unless turned off. */
+    static boolean isJumpOnClick() {
+        return PropertiesComponent.getInstance().getBoolean(JUMP_KEY, true);
+    }
+
+    static void setJumpOnClick(boolean on) {
+        PropertiesComponent.getInstance().setValue(JUMP_KEY, on, true);
+    }
 
     static boolean isFlat() {
         return PropertiesComponent.getInstance().getBoolean(FLAT_KEY, false);
@@ -606,7 +642,7 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
 
     void setFlat(boolean flat) {
         PropertiesComponent.getInstance().setValue(FLAT_KEY, flat, false);
-        if (source != null) build(source, shownFound);
+        if (message != null) build(message, shownFound);
     }
 
     private DefaultMutableTreeNode fieldNode(FixNode.FieldNode n, @Nullable FoundMessage found, @Nullable String groupMeaning) {
@@ -734,6 +770,16 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         return null;
     }
 
+    /**
+     * A click on a row. A single click selects the value (or the {@code tag=} part) in the editor and keeps the focus
+     * here, unless Jump to Source on Click is off; then it only selects the row. A double click always opens the
+     * value in the editor and moves the focus there, as Enter does.
+     */
+    private void clicked(@Nullable Row r, int column, int clickCount) {
+        if (clickCount >= 2) navigate(r, column, true);
+        else if (isJumpOnClick()) navigate(r, column, false);
+    }
+
     private void navigate(@Nullable Row r, int column, boolean focusEditor) {
         if (r == null || document == null) return;
         RangeMarker m = column == COL_VALUE ? r.valueMarker : r.tagMarker;
@@ -850,9 +896,20 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         return rows;
     }
 
-    /** {@link #AUTO} or a version id of {@link DictionarySet#VERSIONS}. */
-    void setDictionary(String version) {
-        dictionary.setSelectedItem(version);
+    /** Chooses a key of {@link FixActiveDictionary}, as picking it in the drop-down does. */
+    void setDictionary(String key) {
+        dictionary.setSelectedItem(key);
+    }
+
+    String chosenDictionary() {
+        return (String) dictionary.getSelectedItem();
+    }
+
+    /** The drop-down's entries as shown, top to bottom. */
+    List<String> dictionaryChoices() {
+        List<String> out = new ArrayList<>();
+        for (int i = 0; i < dictionary.getItemCount(); i++) out.add(FixActiveDictionary.label(dictionary.getItemAt(i)));
+        return out;
     }
 
     void setSearchText(String text) {
@@ -905,8 +962,9 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         return header.getText();
     }
 
+    /** A single click, or a double click when {@code focusEditor}, on the row. */
     void click(Row r, int column, boolean focusEditor) {
-        navigate(r, column, focusEditor);
+        clicked(r, column, focusEditor ? 2 : 1);
     }
 
     @Override

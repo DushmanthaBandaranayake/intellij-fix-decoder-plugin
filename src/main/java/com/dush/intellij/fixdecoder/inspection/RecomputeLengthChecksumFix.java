@@ -1,5 +1,6 @@
 package com.dush.intellij.fixdecoder.inspection;
 
+import com.dush.intellij.fixdecoder.FixDecoderIcons;
 import com.dush.intellij.fixdecoder.core.parse.FixRewriter;
 import com.dush.intellij.fixdecoder.edit.FixEdits;
 import com.dush.intellij.fixdecoder.extract.FoundMessage;
@@ -7,17 +8,26 @@ import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Iconable;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import org.jetbrains.annotations.NotNull;
 
+import javax.swing.Icon;
+
 /** Rewrites BodyLength (9) and CheckSum (10) so that they match the message. */
-final class RecomputeLengthChecksumFix implements LocalQuickFix {
+final class RecomputeLengthChecksumFix implements LocalQuickFix, Iconable {
 
     @Override
     public @NotNull String getFamilyName() {
         return "Recompute BodyLength and CheckSum";
+    }
+
+    /** The plugin icon, so that the plugin's entries stand out in the Alt+Enter list. */
+    @Override
+    public Icon getIcon(@IconFlags int flags) {
+        return FixDecoderIcons.DECODER;
     }
 
     @Override

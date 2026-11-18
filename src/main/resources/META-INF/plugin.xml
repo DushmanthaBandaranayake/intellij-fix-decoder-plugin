@@ -32,6 +32,19 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>1.2.0-beta</b></p>
+        <ul>
+            <li>The decoder's dictionary drop-down now chooses the dictionary in use for the whole project, in the
+                editor (hover, problems, hints) as well as the table: Auto (the version comes from each message's
+                BeginString, with every custom dictionary), FIX 4.2, FIX 4.4, FIXT 1.1 / FIX 5.0 SP2, or one custom
+                dictionary on its own, so conflicting custom dictionaries no longer have to be merged</li>
+            <li>The settings no longer have a version for messages without BeginString: they are decoded as FIX 4.4,
+                or with the dictionary chosen in the decoder</li>
+            <li>Decoder table: a Jump to Source on Click toggle in the toolbar, on by default; when it is off, a click
+                only selects the row, and double-click or Enter still jumps to the editor</li>
+            <li>The FIX Decoder icon on every menu entry of the plugin: the editor menu, Alt+Enter, the paste popup
+                and notifications</li>
+        </ul>
         <p><b>1.0.2-beta</b></p>
         <ul>
             <li>Decoder table: Ctrl+C copies the Value of the selected rows</li>
@@ -66,6 +79,7 @@
     <extensions defaultExtensionNs="com.intellij">
         <projectService serviceImplementation="com.dush.intellij.fixdecoder.settings.FixDecoderSettings"/>
         <projectService serviceImplementation="com.dush.intellij.fixdecoder.settings.FixDictionaries"/>
+        <projectService serviceImplementation="com.dush.intellij.fixdecoder.settings.FixActiveDictionary"/>
         <notificationGroup id="FIX Decoder" displayType="BALLOON"/>
         <projectConfigurable parentId="tools" id="com.dush.fixdecoder.settings" displayName="FIX Decoder"
                              instance="com.dush.intellij.fixdecoder.settings.FixDecoderConfigurable"/>
@@ -119,7 +133,7 @@
                     text="Decode FIX Message" description="Show the FIX message at the caret in the FIX Decoder tool window">
                 <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift F"/>
             </action>
-            <action id="FixDecoder.CopyReadable" class="com.dush.intellij.fixdecoder.actions.CopyReadableAction" icon="AllIcons.Actions.Copy"
+            <action id="FixDecoder.CopyReadable" class="com.dush.intellij.fixdecoder.actions.CopyReadableAction" icon="/icons/fixDecoder.svg"
                     text="Copy FIX Message as Readable" description="Copy the FIX message at the caret with | as delimiter"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </group>
