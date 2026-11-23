@@ -55,6 +55,7 @@ import com.intellij.ui.JBColor;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.ui.content.Content;
 import com.intellij.ui.treeStructure.treetable.ListTreeTableModelOnColumns;
 import com.intellij.ui.treeStructure.treetable.TreeColumnInfo;
 import com.intellij.ui.dualView.TreeTableView;
@@ -87,6 +88,8 @@ import java.util.List;
  * instances. Clicking a value selects it in the editor (the tag cell selects the {@code tag=} part) and keeps the
  * focus here; a double click or Enter moves the focus to the editor. Moving the caret in the editor selects the
  * matching row. The view follows edits of the message and says so when it no longer parses.
+ * <p>
+ * Each tab of the tool window holds one panel and shows one message ({@link FixDecoderToolWindow}).
  */
 public final class FixDecoderPanel extends JPanel implements Disposable {
     static final int COL_TAG = 0;
@@ -123,6 +126,7 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
     private Timer refreshTimer;
     private boolean navigating;
     private boolean stale;
+    private Content tab;
 
     /** One row of the table: a field, or a group instance. */
     static final class Row {
@@ -181,7 +185,7 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
             }
         });
         table.getEmptyText().setText("Put the caret in a FIX message and choose Decode FIX Message,")
-                .appendSecondaryText("or paste a message", SimpleTextAttributes.LINK_ATTRIBUTES, e -> askForMessage());
+                .appendSecondaryText("or paste a message", SimpleTextAttributes.LINK_ATTRIBUTES, e -> FixDecoderToolWindow.pasteMessage(project));
         installListeners();
 
         JPanel top = new JPanel(new BorderLayout());
@@ -227,6 +231,8 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
             if (loadingChoices) return;
             FixActiveDictionary.choose(project, (String) dictionary.getSelectedItem());
             decodeAgain();
+            // the choice is the project's: the other tabs follow
+            FixDecoderToolWindow.dictionariesChanged(project, this);
         });
     }
 
@@ -408,7 +414,8 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         group.add(new PanelAction("Copy as Readable", "Copy the message with | as delimiter", AllIcons.Actions.Copy, () -> {
             if (message != null) CopyPasteManager.getInstance().setContents(new StringSelection(FixRewriter.readable(message)));
         }));
-        group.add(new PanelAction("Paste Message", "Decode a message from text you paste", AllIcons.Actions.MenuPaste, this::askForMessage));
+        group.add(new PanelAction("Paste Message", "Decode a message from text you paste, in a new tab", AllIcons.Actions.MenuPaste,
+                () -> FixDecoderToolWindow.pasteMessage(project)));
         group.addSeparator();
         group.add(new FlatToggle());
         group.add(new JumpToSourceToggle());
@@ -530,18 +537,63 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         build(m, null);
     }
 
-    void askForMessage() {
+    /** Asks for a message to paste; null when the dialog was cancelled or the text holds no message. */
+    @Nullable
+    static FixMessage askForMessage(@NotNull Project project) {
         String text = Messages.showMultilineInputDialog(project,
                 "Paste a FIX message. Delimiters: SOH, |, ^A or ^. Text copied from Java source works too.",
                 "FIX Decoder", "", null, null);
-        if (text == null || text.trim().isEmpty()) return;
+        if (text == null || text.trim().isEmpty()) return null;
         FixMessage m = FixParser.parse(FixText.fromSource(text), FixDictionaries.get(project).set(),
                 FixDictionaries.get(project).defaultVersion());
-        if (m == null) {
-            Messages.showWarningDialog(project, "No FIX message found in the text.", "FIX Decoder");
-            return;
+        if (m == null) Messages.showWarningDialog(project, "No FIX message found in the text.", "FIX Decoder");
+        return m;
+    }
+
+    // --- the tab ---
+
+    /** The tool window tab holding this panel; null in tests that use the panel alone. */
+    void setTab(@Nullable Content tab) {
+        this.tab = tab;
+    }
+
+    /** True when no message has been shown yet: the empty tab, which the next message takes over. */
+    boolean isEmpty() {
+        return message == null;
+    }
+
+    /** True when this tab shows the message at {@code range} of {@code document}. */
+    boolean shows(@NotNull Document document, @Nullable TextRange range) {
+        return this.document == document && range != null && messageMarker != null && messageMarker.isValid()
+                && messageMarker.getStartOffset() <= range.getEndOffset() && messageMarker.getEndOffset() >= range.getStartOffset();
+    }
+
+    /** The tab's name: the message type, as in "NewOrderSingle D", with "Pasted: " in front for pasted text. */
+    String tabTitle() {
+        if (message == null) return "";
+        String type = message.typeName();
+        String msgType = message.value(35);
+        String title = type != null ? type + " " + msgType : msgType != null ? "MsgType " + msgType : "Fragment";
+        return document == null ? "Pasted: " + title : title;
+    }
+
+    /** The tab's tooltip: where the message is, as in "OrderTest.java:42", and the dictionary. */
+    String tabTooltip() {
+        if (message == null) return null;
+        String where = "pasted";
+        if (document != null && shownFound != null) {
+            VirtualFile vf = FileDocumentManager.getInstance().getFile(document);
+            TextRange r = shownFound.displayRange();
+            if (vf != null && r != null) where = vf.getName() + ":" + (document.getLineNumber(r.getStartOffset()) + 1);
         }
-        showText(m);
+        return where + " · " + message.dictionary().label();
+    }
+
+    private void updateTab() {
+        if (tab == null) return;
+        tab.setDisplayName(tabTitle());
+        tab.setDescription(tabTooltip());
+        tab.setCloseable(true);
     }
 
     private void detachDocument() {
@@ -578,6 +630,7 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         setColumnWidths();
         TreeUtil.expandAll(table.getTree());
         applySearch(false);
+        updateTab();
     }
 
     private void addNodes(DefaultMutableTreeNode parent, List<FixNode> nodes, @Nullable FoundMessage found) {
@@ -640,8 +693,17 @@ public final class FixDecoderPanel extends JPanel implements Disposable {
         return PropertiesComponent.getInstance().getBoolean(FLAT_KEY, false);
     }
 
+    /** Remembers the view and redraws this tab and every other one. */
     void setFlat(boolean flat) {
         PropertiesComponent.getInstance().setValue(FLAT_KEY, flat, false);
+        redraw();
+        FixDecoderToolWindow.forEachPanel(project, p -> {
+            if (p != this) p.redraw();
+        });
+    }
+
+    /** Draws the message shown again, after the flat or grouped view changed. */
+    void redraw() {
         if (message != null) build(message, shownFound);
     }
 

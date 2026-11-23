@@ -4,13 +4,14 @@
     <name>FIX Decoder</name>
     <vendor email="dushmanthab99@gmail.com">Dushmantha Bandaranayake</vendor>
     <description><![CDATA[
-        <p>Reads FIX protocol messages where they are written: in Java string literals, text blocks and
-        concatenations, and in plain text files.</p>
+        <p>Reads FIX protocol messages where they are written: in Java string literals, text blocks,
+        concatenations and comments, and in plain text files.</p>
         <ul>
             <li><b>Hover</b> over a field to see the tag name, type, what the value means (<code>54=1</code> is Buy),
                 the other allowed values, and whether the message type requires it</li>
             <li><b>Decode</b> a message into a table in the FIX Decoder tool window, with repeating groups as
-                numbered instances. Click a value to select it in the editor, even inside a concatenation</li>
+                numbered instances, one tab per message. Click a value to select it in the editor, even inside a
+                concatenation</li>
             <li><b>Repeating groups are checked</b>: counts against the instances found, the first field of each
                 instance, field order, and unknown tags that end a group early</li>
             <li>Wrong <b>BodyLength (9)</b> and <b>CheckSum (10)</b> are reported, and a quick fix recomputes them,
@@ -32,6 +33,15 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>1.3.0-beta</b></p>
+        <ul>
+            <li>FIX messages in Java comments (<code>//</code>, <code>/* */</code> and Javadoc) are decoded too: hover,
+                Decode, the checks and their fixes, and inline hints work there. A message in a comment must fit on one
+                line</li>
+            <li>Decoder: one tab per message, named after its type (NewOrderSingle D); the tab's tooltip says where
+                the message is. Decoding a message that already has a tab selects it, and a pasted message gets a new
+                tab. The dictionary drop-down and the flat view apply to every tab</li>
+        </ul>
         <p><b>1.2.0-beta</b></p>
         <ul>
             <li>The decoder's dictionary drop-down now chooses the dictionary in use for the whole project, in the
@@ -123,7 +133,7 @@
         <!-- Inline hints after values with a meaning -->
         <highlightingPassFactory implementation="com.dush.intellij.fixdecoder.hints.FixHintsPassFactory"/>
 
-        <toolWindow id="FIX Decoder" anchor="bottom" icon="/icons/toolWindow.svg" canCloseContents="false"
+        <toolWindow id="FIX Decoder" anchor="bottom" icon="/icons/toolWindow.svg" canCloseContents="true"
                     factoryClass="com.dush.intellij.fixdecoder.toolwindow.FixDecoderToolWindow"/>
     </extensions>
 
