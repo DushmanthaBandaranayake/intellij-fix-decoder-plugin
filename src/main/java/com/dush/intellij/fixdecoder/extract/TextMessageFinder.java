@@ -20,10 +20,18 @@ public final class TextMessageFinder {
 
     public static List<FoundMessage> find(CharSequence text, FixDictionaries dictionaries) {
         if (text.length() > MAX_LENGTH) return Collections.emptyList();
+        return find(text, 0, dictionaries);
+    }
+
+    /**
+     * Finds the messages in {@code text}, a piece of the document (e.g. a comment) written as it is, starting at
+     * {@code offset}.
+     */
+    public static List<FoundMessage> find(CharSequence text, int offset, FixDictionaries dictionaries) {
         DictionarySet set = dictionaries.set();
         List<FoundMessage> out = new ArrayList<>();
         for (FixScanner.Span span : FixScanner.scan(text, set::isKnownTag)) {
-            FoundMessage m = message(text.subSequence(span.start(), span.end()).toString(), span.start(), dictionaries);
+            FoundMessage m = message(text.subSequence(span.start(), span.end()).toString(), offset + span.start(), dictionaries);
             if (m != null) out.add(m);
         }
         return out;

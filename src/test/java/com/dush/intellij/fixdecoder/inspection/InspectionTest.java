@@ -62,6 +62,14 @@ public class InspectionTest extends FixTestCase {
         assertEquals("[]", lengthAndChecksumProblems(only()).toString());
     }
 
+    public void testRecomputeInComment() {
+        java("// 8=FIX.4.4|9=1|35=0|49=A|56=B|10=<caret>000|\nint x;");
+        myFixture.launchAction(myFixture.findSingleIntention("Recompute BodyLength and CheckSum"));
+        String text = text();
+        assertTrue(text, text.contains("// 8=FIX.4.4|9=15|35=0|49=A|56=B|10="));
+        assertEquals("[]", lengthAndChecksumProblems(only()).toString());
+    }
+
     public void testRecomputeKeepsOctalEscapes() {
         java("String m = \"8=FIX.4.4\\0019=1\\00135=0\\00110=<caret>000\\001\";");
         myFixture.launchAction(myFixture.findSingleIntention("Recompute BodyLength and CheckSum"));

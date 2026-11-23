@@ -1,6 +1,6 @@
 # FIX Decoder
 
-An IntelliJ plugin for FIX protocol messages written in Java code (string literals, text blocks, `+` concatenations) and in plain text files.
+An IntelliJ plugin for FIX protocol messages written in Java code (string literals, text blocks, `+` concatenations, and comments) and in plain text files.
 
 ## Features
 
@@ -9,7 +9,7 @@ An IntelliJ plugin for FIX protocol messages written in Java code (string litera
 ![Broken repeating group and wrong BodyLength and CheckSum, fixed with Alt+Enter](docs/images/fix-decoder-validate.gif)
 
 - **Hover**: rest the mouse on a field to see its tag name, type, the meaning of its value (`54=1` is Buy), the other allowed values, its group and instance, and whether the message type requires it. In Java the details appear in IntelliJ's own documentation popup (hover or Ctrl+Q), so there is only one popup; in plain text, and in Java when hover documentation is off, the plugin shows its own popup, which also has a *Decode message* link.
-- **Decoder tool window**: *Decode FIX Message* (editor context menu, `Ctrl+Alt+Shift+F`) shows the message at the caret in a tree table with the columns Tag, Name, Value and Meaning. Repeating groups are shown as numbered instances.
+- **Decoder tool window**: *Decode FIX Message* (editor context menu, `Ctrl+Alt+Shift+F`) shows the message at the caret in a tree table with the columns Tag, Name, Value and Meaning. Repeating groups are shown as numbered instances. Each message opens in its own tab, named after its type (*NewOrderSingle D*); hover the tab to see where the message is. Decoding a message that already has a tab selects that tab, and a pasted message gets a new tab (*Pasted: Logon A*).
   - Clicking a value selects it in the editor; clicking the tag selects the `tag=` part. The focus stays in the table, so you can use the arrow keys.
   - Double-click or Enter moves the focus to the editor.
   - Moving the caret in the editor selects the matching row.
@@ -37,6 +37,8 @@ A message is either:
 All fields of a message use the same delimiter: SOH, `^A`, `|` or `^`.
 
 In Java, the literal parts of a concatenation are decoded with the literal's own escaping, so positions map back to the source. Constants such as `SOH` are evaluated. Other parts (method calls) show as `…` and switch off the BodyLength and CheckSum checks for that message.
+
+Java comments (`//`, `/* */` and Javadoc) are read as plain text, as in a log file: hover, Decode, the checks and their fixes, and inline hints work there. A message in a comment must fit on one line; one that wraps onto the next Javadoc line is read as two messages.
 
 ## Dictionaries
 

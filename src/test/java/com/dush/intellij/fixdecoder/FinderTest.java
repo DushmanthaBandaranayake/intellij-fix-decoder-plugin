@@ -65,6 +65,29 @@ public class FinderTest extends FixTestCase {
         assertTrue(messages().isEmpty());
     }
 
+    public void testComments() {
+        java("// sent: 8=FIX.4.4|9=5|35=0|10=163|\n"
+                + "/* reply 35=D|55=IBM|54=1 */\n"
+                + "/**\n"
+                + " * Fills look like 35=8|55=IBM|54=2|\n"
+                + " * and cancels like 35=F|55=IBM|54=1|\n"
+                + " */\n"
+                + "String m = \"35=D|55=MSFT|54=1|\";\n"
+                + "// a=1|b=2|c=3");
+        List<FoundMessage> all = messages();
+        assertEquals(5, all.size());
+        // in document order, the literal last
+        assertEquals("[0, D, 8, F, D]", all.stream().map(f -> f.message().value(35)).collect(java.util.stream.Collectors.toList()).toString());
+        FoundMessage line = all.get(0);
+        assertFalse(line.inJavaCode());
+        assertEquals("163", text(line.valueRange(line.message().first(10))));
+        assertEquals("54=1", text(all.get(1).fieldRange(all.get(1).message().first(54))));
+        // one message per Javadoc line
+        assertEquals("Sell", all.get(2).message().node(2).meaning());
+        assertEquals(3, all.get(3).message().fields().size());
+        assertTrue(all.get(4).inJavaCode());
+    }
+
     public void testPlainText() {
         myFixture.configureByText("orders.log", "10:00 IN 8=FIX.4.4|9=5|35=0|10=163|\n10:01 OUT 35=D|55=IBM|54=1\n");
         List<FoundMessage> all = messages();

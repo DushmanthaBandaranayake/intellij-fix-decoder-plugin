@@ -6,12 +6,14 @@ import com.dush.intellij.fixdecoder.core.parse.FixParser;
 import com.dush.intellij.fixdecoder.core.parse.FixScanner;
 import com.dush.intellij.fixdecoder.extract.FixMessageFinder;
 import com.dush.intellij.fixdecoder.extract.FoundMessage;
+import com.dush.intellij.fixdecoder.extract.TextMessageFinder;
 import com.dush.intellij.fixdecoder.settings.FixDictionaries;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.JavaRecursiveElementWalkingVisitor;
 import com.intellij.psi.JavaTokenType;
 import com.intellij.psi.LiteralTextEscaper;
+import com.intellij.psi.PsiComment;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiExpression;
 import com.intellij.psi.PsiFile;
@@ -30,7 +32,9 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Finds messages in Java string literals, text blocks and {@code +} concatenations of them.
+ * Finds messages in Java string literals, text blocks and {@code +} concatenations of them, and in comments.
+ * <p>
+ * Comments are scanned as plain text: every character is where it is written, and a message ends at the line end.
  * <p>
  * Literal parts are decoded with the literal's own escaper, which also gives the document offset of every decoded
  * character. Other parts are evaluated as constants (e.g. {@code SOH}); their characters have no document range.
@@ -65,6 +69,15 @@ public final class JavaMessageFinder implements FixMessageFinder {
             public void visitLiteralExpression(PsiLiteralExpression expression) {
                 if (!done.contains(expression) && isStringLiteral(expression) && expression.getText().indexOf('=') >= 0) {
                     addMessages(List.of(expression), dictionaries, out);
+                }
+            }
+
+            @Override
+            public void visitComment(PsiComment comment) {
+                // line, block and Javadoc comments: written as they are, so scanned like plain text
+                String text = comment.getText();
+                if (text.indexOf('=') >= 0) {
+                    out.addAll(TextMessageFinder.find(text, comment.getTextRange().getStartOffset(), dictionaries));
                 }
             }
         });
