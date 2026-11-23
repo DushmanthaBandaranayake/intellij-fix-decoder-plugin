@@ -33,6 +33,15 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>1.3.0-beta</b></p>
+        <ul>
+            <li>FIX messages in Java comments (<code>//</code>, <code>/* */</code> and Javadoc) are decoded too: hover,
+                Decode, the checks and their fixes, and inline hints work there. A message in a comment must fit on one
+                line</li>
+            <li>Decoder: one tab per message, named after its type (NewOrderSingle D); the tab's tooltip says where
+                the message is. Decoding a message that already has a tab selects it, and a pasted message gets a new
+                tab. The dictionary drop-down and the flat view apply to every tab</li>
+        </ul>
         <p><b>1.2.0-beta</b></p>
         <ul>
             <li>The decoder's dictionary drop-down now chooses the dictionary in use for the whole project, in the
